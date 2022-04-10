@@ -2165,7 +2165,20 @@ void writeToFuelStream(Map req){
 	String n=handleFuelS()
 	String streamName="${(req.c ?: sBLK)}||${req.n}"
 
-	def result=getChildApps().find{ (String)it.name==n && ((String)it.label).contains(streamName)}
+    def  fapps=getChildApps().findAll{ (String)it.name==n && ((String)it.label).contains(streamName)}         //@srbarcus
+                                                                                                              //@srbarcus
+    def result = null                                                                                         //@srbarcus
+                                                                                                              //@srbarcus
+    fapps.each {                                                                                              //@srbarcus
+       def ndx = it.label.indexOf(' - ' )                                                                     //@srbarcus
+       if (ndx >= 0) {                                                                                        //@srbarcus
+         def label = it.label.substring(ndx + 3)                                                              //@srbarcus
+         if (label == streamName) {                                                                           //@srbarcus
+           result = it                                                                                        //@srbarcus
+         }                                                                                                    //@srbarcus
+       }     	                                                                                              //@srbarcus
+    }                                                                                                         //@srbarcus
+     
 //	def fuelStreams=isHubitat() ? [] : atomicState.fuelStreams ?: []
 
 	if(!result){
@@ -2175,10 +2188,11 @@ void writeToFuelStream(Map req){
 			return
 		}
 */
-		def t0=getChildApps().findAll{ (String)it.name==name }.collect{ ((String)it.label).split(' - ')[0].toInteger()}.max()
+                def t0=getChildApps().findAll{ (String)it.name==n }.collect{ ((String)it.label).split(' - ')[0].toInteger()}.max()           //@srbarcus
+          
 		def id=(t0 ?: 0) + 1
 		try{
-			result=addChildApp('ady624', name, "$id - $streamName")
+                        result=addChildApp('ady624', n, "$id - $streamName")                                                                 //@srbarcus
 /*
 			if(!isHubitat()){
 				fuelStreams=getChildApps().find{ it.name==name }.collect { it.label }
