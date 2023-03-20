@@ -4597,6 +4597,10 @@ let graphData={};
 let stack={};
 
 let websocket;
+let chart;
+let callbackEvent = null;
+let overlayEvent = null;
+let overlayDone = 0;
 
 class Loader{
 	constructor(){
@@ -4804,6 +4808,7 @@ async function onLoad(){
 	await getGraphData();
 
 	loader.setText('Drawing chart (4/4)');
+	chart=new ${drawType_timegraph}(document.getElementById("timeline"));
 
 	//create stack
 	Object.entries(graphData).forEach(([deviceId, attrs]) =>{
@@ -5025,12 +5030,25 @@ function drawChart(callback){
 
 	graphOptions.hAxis=Object.assign(graphOptions.hAxis,{ viewWindow:{ min: moment(min).toDate(), max: moment(now).toDate() } });
 
-	let chart=new ${drawType_timegraph}(document.getElementById("timeline"));
+	if (overlayEvent) {
+		google.visualization.events.removeListener(overlayEvent);
+		overlayEvent = null;
+		overlayDone = 1;
+	}
+
+	if (callbackEvent) {
+		google.visualization.events.removeListener(callbackEvent);
+		callbackEvent = null;
+	}
 
 	//if we have a callback
-	if(callback) google.visualization.events.addListener(chart, 'ready', callback);
+	if (callback) {
+		callbackEvent = google.visualization.events.addListener(chart, 'ready', callback);
+	}
 
-	if(options.overlays.display_overlays) google.visualization.events.addListener(chart, 'ready', placeMarker.bind(chart, dataTable));
+	if (options.overlays.display_overlays && (! overlayDone)) {
+		overlayEvent = google.visualization.events.addListener(chart, 'ready', placeMarker.bind(chart, dataTable));
+	}
 
 	chart.draw(dataTable, graphOptions);
 
