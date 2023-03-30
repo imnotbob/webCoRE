@@ -1673,7 +1673,9 @@ Map gtLatestMap(Map ent, Boolean multiple=true){
  * get latest double value of data source entry
  * @return doubleVal
  */
-Double getLatestVal(Map ent, Boolean multiple=true){
+// The original numeric conversion interferes with the subsequent attribute state lookup in getValue() called by getOverlay_timegraph().
+// Double getLatestVal(Map ent, Boolean multiple=true){
+String getLatestVal(Map ent, Boolean multiple=true){
 	String val
 	val='0.0'
 
@@ -1683,7 +1685,8 @@ Double getLatestVal(Map ent, Boolean multiple=true){
 	}
 
 	if(isEric())myDetail null,"getLatestVal $ent $multiple $val ",iN2
-	return extractNumber(val)
+	//return extractNumber(val)
+	return val
 }
 
 /**
@@ -3814,7 +3817,7 @@ def graphTimegraph(){
 	List<Map<String,String>> timespanEnum2=[
 			["10":"10 Milliseconds"], ["1000":"1 Second"], ["5000":"5 Seconds"], ["30000":"30 Seconds"],
 			["60000":"1 Minute"], ["120000":"2 Minutes"], ["300000":"5 Minutes"], ["600000":"10 Minutes"],
-			["2400000":"30 minutes"], ["3600000":"1 Hour"], ["43200000":"12 Hours"],
+			["1800000":"30 minutes"], ["3600000":"1 Hour"], ["43200000":"12 Hours"],
 			["86400000":"1 Day"], ["259200000":"3 Days"], ["604800000":"1 Week"], ["1209600000":"2 Weeks"],
 			["2629800000":"1 Month"]]
 
@@ -4287,7 +4290,7 @@ def graphTimegraph(){
 						app.updateSetting (asasn, possible_values)
 					}
 
-					if(!enumType){
+					if(1 || !enumType){  // Allow enum types to have custome states also.
 						String csn= "attribute_${sa}_custom_states"
 						Boolean cs
 						cs= settings[csn]
@@ -4387,11 +4390,11 @@ def graphTimegraph(){
 
 					if(gtSetB("attribute_${sa}_bad_value")){
 
-						container << hubiForm_text_input("<b>Min Value to Exclude</b><br><small>If the recorded sensor value is <b>below</b> this value it will be dropped</small>",
+						container << hubiForm_text_input("<b>Min Value to Include</b><br><small>If the recorded sensor value is <b>below</b> this value it will be dropped</small>",
 								"attribute_${sa}_min_value",
 								s0, false)
 
-						container << hubiForm_text_input("<b>Max Value to Exclude</b><br><small>If the recorded sensor value is <b>above</b> this value it will be dropped</small>",
+						container << hubiForm_text_input("<b>Max Value to Include</b><br><small>If the recorded sensor value is <b>above</b> this value it will be dropped</small>",
 								"attribute_${sa}_max_value",
 								s100, false)
 					}
@@ -4413,15 +4416,10 @@ String getData_timegraph(){
 
 	Map<String,Map> resp=[:]
 
-	Long graph_time
-	Date then
-	then=new Date()
-
-	use (TimeCategory){
-		Double val=Double.parseDouble(gtSetStr('graph_timespan'))/1000.0
-		then -= (val.toInteger()).seconds
-		graph_time=then.getTime()
-	}
+	// Get extra data before the start of the timespan to cover the width of the first integration bucket.
+	Long timespan = Long.parseLong(gtSetStr('graph_timespan'))
+	Long pointspan = Long.parseLong(gtSetStr('graph_point_span'))
+	Long graph_time = new Date().getTime() - timespan - (pointspan / 2)
 
 //	TODO
 	List<Map> dataSources=gtDataSources()
@@ -4436,17 +4434,33 @@ String getData_timegraph(){
 
 			List<Map> data
 
-			data=CgetData(ent,then)
-			//return [date: d, (sVAL): sum.round(decimals), t: d.getTime()]
-			data=data.collect{ Map it -> [(sDT): (Long)it[sT], (sVAL): getValue(sid, attribute, it[sVAL])]}
+			data = gtDataSourceData(ent)  // Get all sensor data regardless of time.
 
-			resp[sid][attribute]=data.findAll{ Map it -> (Long)it[sDT] > graph_time}
+			// Get the index of the first data item that is in the timespan.
+			def first_index = data.findIndexOf{ Map it -> (Long)it[sT] > graph_time}
 
-			//Restrict "bad" values
+			if (first_index >= 0) {  // Some data is in the timespan:
+				if (first_index > 0) {  // Also some data is before the timespan:
+					data = data.subList(first_index - 1, data.size())  // Take the last item before the timespan, and everything later.
+				} else {  // No data is before the timespan:
+					// Take all the data that we have.
+				}
+			} else {  // No data is in the timespan:
+				if (data.size() >= 1) {  // But some data is before the timespan:
+					data = [ data[data.size() - 1] ]  // Take the latest data item that we have.
+				} else {  // No data at all:
+					// No data at all.  MAY NOT BE ABLE TO HIT THIS CASE!
+				}
+			}
+
+			// Map state names to values.
+			resp[sid][attribute]=data.collect{ Map it -> [(sDT): (Long)it[sT], (sVAL): getValue(sid, attribute, it[sVAL])]}
+
+			// Eliminate "bad" values
 			if(gtSetB("attribute_${sa}_bad_value")){
 				Float min=Float.valueOf(settings["attribute_${sa}_min_value"].toString())
 				Float max=Float.valueOf(settings["attribute_${sa}_max_value"].toString())
-				resp[sid][attribute]= ((List<Map>)resp[sid][attribute]).findAll{ Map it -> (Double)it[sVAL] > min && (Double)it[sVAL] < max}
+				resp[sid][attribute]= ((List<Map>)resp[sid][attribute]).findAll{ Map it -> (Double)it[sVAL] >= min && (Double)it[sVAL] <= max}
 			}
 		}
 	}
@@ -4475,6 +4489,12 @@ Map getOptions_timegraph(){
 					"height": gtSetB('graph_static_size') ? graph_v_size : "100%",
 					"chartArea": [ "width":	graph_percent_fill ? "${graph_h_fill}%" : "80%",
 									"height": graph_percent_fill ? "${graph_v_fill}%" : "80%"],
+					"explorer": [
+						"actions": ["dragToZoom", "rightClickToReset"],
+						"axis": "horizontal",
+						"keepInBounds": true,
+						"maxZoomIn": 40.0
+					],
 					"hAxis": [
 							"textStyle": ["fontSize": graph_haxis_font,
 										"color": gtSetB('graph_hh_color_transparent') ? sTRANSPRNT : graph_hh_color
@@ -4674,7 +4694,6 @@ function getSubscriptions(){
 	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
 		console.log("Got Subscriptions");
 		subscriptions=data;
-
 	});
 }
 
@@ -4704,6 +4723,12 @@ function parseEvent(event){
 			value=parseFloat(state);
 		}
 
+		if (subscriptions.drop[deviceId][attribute].restrict_bad &&
+			((value < subscriptions.drop[deviceId][attribute].min) ||
+			 (value > subscriptions.drop[deviceId][attribute].max))) {
+			return;
+		}
+
 		graphData[deviceId][attribute].push({ date: now, value: value });
 
 		updateOverlay(deviceId, attribute, value);
@@ -4722,11 +4747,16 @@ function update(callback){
 	//boot old data
 	let min=new Date().getTime();
 	min -= options.graphTimespan;
+	// Need to keep extra data before the start of the specified timespan to cover the width of the first integration bucket.
+	min -= options.graphPointSpan / 2;
 
 	//First Filter Events that are too old
 	Object.entries(graphData).forEach(([deviceId, attributes]) =>{
 		Object.entries(attributes).forEach(([attribute, events]) =>{
-			graphData[deviceId][attribute]=events.filter(it => it.date > min);
+			let index = events.findIndex(it => it.date > min);         // Get index of the first event in the timespan.
+			if (index > 1) {                                           // If we have more than one event before the timespan:
+				graphData[deviceId][attribute]=events.slice(index-1);  //   Keep just one event before the timespan (and everything in the timespan).
+			}
 		});
 	});
 	drawChart(callback);
@@ -4987,10 +5017,28 @@ function drawChart(callback){
 	var newEntry;
 	var next;
 
-	//adjust for days
-	if(options.graphPointSpan >= 86400000){
-		let d=new Date(then);
+	// Round up the timespan start point to naturally align the center of the integration intervals on day / hour / minute / second boundaries.
+	if(spacing >= 86400000){  // Align to day
+		let d=new Date(then + 86400000 - 1);
 		d.setHours(0, 0, 0, 0);
+		then=d.getTime();
+	} else if (spacing >= 3600000) {  // Align to hour multiple
+		let d=new Date(then + spacing - 1);
+		let spacing_hours = Math.floor(spacing / 3600000);
+		let hours = Math.floor(d.getHours() / spacing_hours) * spacing_hours;
+		d.setHours(hours, 0, 0, 0);
+		then=d.getTime();
+	} else if (spacing >= 60000) {  // Align to minute multiple
+		let d=new Date(then + spacing - 1);
+		let spacing_minutes = Math.floor(spacing / 60000);
+		let minutes = Math.floor(d.getMinutes() / spacing_minutes) * spacing_minutes;
+		d.setMinutes(minutes, 0, 0);
+		then=d.getTime();
+	} else if (spacing >= 1000) {  // Align to second multiple
+		let d=new Date(then + spacing - 1);
+		let spacing_seconds = Math.floor(spacing / 1000);
+		let seconds = Math.floor(d.getSeconds() / spacing_seconds) * spacing_seconds;
+		d.setSeconds(seconds, 0);
 		then=d.getTime();
 	}
 
@@ -5002,21 +5050,43 @@ function drawChart(callback){
 
 			let func=subscriptions.var[deviceIndex][attribute].function;
 			let num_events=events.length;
+			let first_valid_index = events.findIndex(it => it.date > then);  // Index of the first event that is in the timespan.
 
 			extend_left=subscriptions.extend[deviceIndex][attribute].left;
 			extend_right=subscriptions.extend[deviceIndex][attribute].right;
 			let drop_line=subscriptions.drop[deviceIndex][attribute].valid;
 			let drop_val=null;
 			let newEntry=undefined;
+			let adj_events = events;
 
 			if(drop_line == "true"){
 				drop_val=parseFloat(subscriptions.drop[deviceIndex][attribute].value);
-			} else if (num_events>0 && extend_left){
-				drop_val=events[0].value;
+			} else if (first_valid_index>=0 && extend_left){
+				drop_val=events[first_valid_index].value;
+
+			} else if ((first_valid_index > 0)                                // We have a data point that is before the timespan
+						                                                      //   and the graph type is line or area
+					   && ['Line', 'Area'].includes(subscriptions.graph_type[deviceIndex][attribute])
+					   && (events[first_valid_index].date >= then + spacing)  //   and the first valid data point is not in the first bucket
+					   && (func == "Average")) {                              //   and the func is Average
+
+				// Replace the last data item that is before the timespan with a dummy data item at the start of the timespan,
+				//   having a value interpolated between the last data item that is not in the timespan and the first one that is.
+				let last_invalid_index = first_valid_index - 1;
+				let dummy_date = then;
+				let dummy_value = events[last_invalid_index].value + ((events[first_valid_index].value - events[last_invalid_index].value) *
+								  (dummy_date - events[last_invalid_index].date) / (events[first_valid_index].date - events[last_invalid_index].date))
+				let dummyDate = new Date(dummy_date);
+			    adj_events = structuredClone(events);
+				adj_events[last_invalid_index].value = dummy_value;
+				adj_events[last_invalid_index].date = dummy_date;
 			}
 
-			current=then;
+			// The start of the timespan has previously been adjusted to be on a naturally aligned boundary.
+			// Start the first integration bucket 1/2 of the spacing earlier to center the bucket on the boundary.
+			current=then - (spacing / 2);
 
+			// Loop through each time bucket, creating a single data point for the bucket from all of the events that are in the bucket.
 			while (current < now){
 				if(subscriptions.graph_type[deviceIndex][attribute] == "Stepped"){
 					drop_val=newEntry?.value ?? events[0]?.value ?? null;
@@ -5024,19 +5094,19 @@ function drawChart(callback){
 				next=current+spacing;
 
 				switch (func){
-					case "Average": newEntry=averageEvents(current, next, events, drop_val); break;
-					case "Min":	newEntry=minEvents(current, next, events, drop_val);	break;
-					case "Max":	newEntry=maxEvents(current, next, events, drop_val);	break;
-					case "Mid":	newEntry=midEvents(current, next, events, drop_val);	break;
-					case "Sum":	newEntry=sumEvents(current, next, events, drop_val);	break;
+					case "Average": newEntry=averageEvents(current, next, adj_events, drop_val); break;
+					case "Min":	newEntry=minEvents(current, next, adj_events, drop_val);	break;
+					case "Max":	newEntry=maxEvents(current, next, adj_events, drop_val);	break;
+					case "Mid":	newEntry=midEvents(current, next, adj_events, drop_val);	break;
+					case "Sum":	newEntry=sumEvents(current, next, adj_events, drop_val);	break;
 				}
 
 				if(drop_line != "true"){
-					if(num_events > 0 && next >= events[0].date && extend_left){
-						drop_val=null;
+					if((first_valid_index >= 0) && (next >= events[first_valid_index].date) && extend_left){
+						drop_val=null;  // The extend left feature has done its job, so disable it now.
 					}
-					if(num_events > 0 && events[num_events-1].date <= next && extend_right){
-						drop_val=events[num_events-1].value;
+					if((first_valid_index >= 0) && (events[num_events-1].date <= next) && extend_right){
+						drop_val=events[num_events-1].value;  // Enable the extend right feature from here to the end.
 					}
 				}
 
@@ -5228,7 +5298,10 @@ Map getSubscriptions_timegraph(){
 				drop_valid=true
 
 			drop_[sid][attr]=[	valid: drop_valid ? sTRUE : sFALSE,
-								(sVAL): drop_valid ? settings["attribute_${sa}_drop_value"] : "null"
+								(sVAL): drop_valid ? settings["attribute_${sa}_drop_value"] : "null",
+								restrict_bad: settings["attribute_${sa}_bad_value"],
+								min: settings["attribute_${sa}_min_value"],
+								max: settings["attribute_${sa}_max_value"]
 			]
 
 			extend_[sid]= extend_[sid] ?: [:]
@@ -6110,7 +6183,7 @@ def graphLinegraph(){
 
 	List<Map<String,String>> timespanEnum2=[
 			["60000":"1 Minute"], ["120000":"2 Minutes"], ["300000":"5 Minutes"], ["600000":"10 Minutes"],
-			["2400000":"30 minutes"], ["3600000":"1 Hour"], ["43200000":"12 Hours"],
+			["1800000":"30 minutes"], ["3600000":"1 Hour"], ["43200000":"12 Hours"],
 			["86400000":"1 Day"], ["259200000":"3 Days"], ["604800000":"1 Week"]
 	]
 
