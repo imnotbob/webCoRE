@@ -4103,7 +4103,8 @@ def graphTimegraph(){
 				String hint= typ=='Fuel' ? " (Canister ${ent.c} Name ${ent.n})" : sBLK
 				String sa= "${sid}_${attribute}".toString()
 
-				String asasn= "attribute_${sa}_states"
+				String asasn= "attribute_${sa}_states"  // Name of setting that holds a list of the names of all states (enum and custom).
+				String asacsn= "attribute_${sa}_custom_state_names"  // Name of setting that holds a list of the names of custom states.
 
 				hubiForm_section("${sLblTyp(sMs(ent,sT))}${dn} - ${attribute}${hint}", 1, "direction",sid+attribute){
 
@@ -4120,7 +4121,7 @@ def graphTimegraph(){
 
 					container << hubiForm_enum ((sTIT):			"Time Integration Function",
 							(sNM):			"var_${sa}_function".toString(),
-							list:			["Average", "Min", "Max", "Mid", "Sum"],
+							list:			["Average", "Min", "Max", "Mid", "Sum", "Median"],
 							(sDEFLT):		"Average")
 
 					container << hubiForm_enum ((sTIT):			"Axis Side",
@@ -4240,7 +4241,9 @@ def graphTimegraph(){
 					Boolean enumType
 					enumType=false
 
-					List<String> possible_values; possible_values=null
+					List<String> possible_values = []  // List of the names of all states (enum and custom).
+					List<String> possible_custom_values = []  // List of the names of custom states.
+					Integer numStates = 0
 
 					//TODO need to check if dataset is quanted, and based on quant type decide if values can be determined
 					// check if data is regular start:
@@ -4282,7 +4285,6 @@ def graphTimegraph(){
 									s100,
 									false)
 						}
-						app.updateSetting (asasn, possible_values)
 					}
 
 					if(1 || !enumType){  // Allow enum types to have custom states also.
@@ -4307,7 +4309,7 @@ def graphTimegraph(){
 									"attribute_${sa}_num_custom_states",
 									"2", true)
 
-							Integer numStates=Integer.parseInt(settings["attribute_${sa}_num_custom_states"].toString())
+							numStates=Integer.parseInt(settings["attribute_${sa}_num_custom_states"].toString())
 							String csin
 							Integer i
 							for(i=0; i<numStates; i++){
@@ -4330,10 +4332,19 @@ def graphTimegraph(){
 
 							}
 
-							//Update Settings
+						}
 
-							possible_values=[]
-							//Integer nums=Integer.parseInt(settings["attribute_${sa}_num_custom_states"].toString())
+						// Remove previous custom state value settings
+						List<String> asacs= (List<String>)settings[asacsn]
+						if(asacs){
+							List<String> old_custom_values=asacs
+							for(String val in old_custom_values){
+								wremoveSetting("attribute_${sa}_${val}")
+							}
+						}
+
+						// Update custom state settings
+						if(cs){
 							for(i=0; i<numStates; i++){
 								csin= "attribute_${sa}_custom_state_${i}"
 								String csi= settings[csin]
@@ -4341,21 +4352,25 @@ def graphTimegraph(){
 								if(csi && csival){
 									String val=csi.replaceAll("\\s",sBLK)
 									possible_values << val
+									possible_custom_values << val
 									app.updateSetting("attribute_${sa}_${val}", csival)
 								}
 							}
-							if(possible_values != []) app.updateSetting (asasn, possible_values)
-
-						}else{
-							List<String> asas= (List<String>)settings[asasn]
-							if(asas){
-								possible_values=asas
-								for(String val in possible_values){
-									app.updateSetting("attribute_${sa}_${val}".toString(),s0)
-								}
-								wremoveSetting(asasn)
-							}
 						}
+					}
+
+					// Update or remove the list of custom state names.
+					if(possible_custom_values.size()) {
+						app.updateSetting (asacsn, possible_custom_values)
+					}else{
+						wremoveSetting(asacsn)
+					}
+
+					// Update or remove the list of all (enum and custom) state names.
+					if(possible_values.size()) {
+						app.updateSetting (asasn, possible_values)
+					}else{
+						wremoveSetting(asasn)
 					}
 
 					//Line and Area Graphs can be "Drop-line"
@@ -4687,8 +4702,9 @@ function getOptions(){
 
 function getSubscriptions(){
 	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
-		console.log("Got Subscriptions");
 		subscriptions=data;
+		console.log("Got Subscriptions");
+		console.log(subscriptions);
 	});
 }
 
@@ -4708,19 +4724,23 @@ function parseEvent(event){
 
 	if(subscriptions.ids.includes(deviceId) && subscriptions.attributes[deviceId].includes(event.name)){
 
-		let value=isNaN(event.value) ? event.value.replace(/ /g,'') : parseFloat((Math.round(event.value * 100) / 100).toFixed(2));
-
 		let attribute=event.name;
 
-		let state=isNaN(value) ? subscriptions.states[deviceId][attribute][value] : undefined;
+		let value = Number(event.value);
 
-		if(state != undefined){
-			value=parseFloat(state);
+		if (isNaN(value)) {
+			let stateName = event.value.replace(/ /g,'');
+			let state = subscriptions.states[deviceId][attribute][stateName];
+
+			if (state != undefined) {
+				value = Number(state);
+			}
 		}
 
 		if (subscriptions.drop[deviceId][attribute].restrict_bad &&
-			((value < subscriptions.drop[deviceId][attribute].min) ||
-			 (value > subscriptions.drop[deviceId][attribute].max))) {
+			 (isNaN(value) ||
+			  (value < subscriptions.drop[deviceId][attribute].min) ||
+			  (value > subscriptions.drop[deviceId][attribute].max))) {
 			return;
 		}
 
@@ -4965,6 +4985,14 @@ function midEvents(minTime, maxTime, data, drop_val){
 		return{ date: minTime+((maxTime - minTime)/2), value: drop_val };
 }
 
+function medianEvents(minTime, maxTime, data, drop_val){
+	const matches=data.filter(it => it.date > minTime && it.date <= maxTime);
+	if(matches.length != 0)
+		return{ date: minTime+((maxTime - minTime)/2), value: matches.sort((a, b) => a.value - b.value)[Math.floor(matches.length/2)].value };
+	else
+		return{ date: minTime+((maxTime - minTime)/2), value: drop_val };
+}
+
 
 function getStyle(deviceIndex, attribute){
 
@@ -4993,7 +5021,7 @@ function drawChart(callback){
 	subscriptions.ids.forEach((deviceId) =>{
 
 		subscriptions.attributes[deviceId].forEach((attr) =>{
-			console.log(deviceId+" "+attr);
+			//console.log(deviceId+" "+attr);
 			dataTable.addColumn({ label: subscriptions.labels[deviceId][attr].replace('%deviceName%', subscriptions.sensors[deviceId].displayName).replace('%attributeName%', attr), type: 'number' });
 			dataTable.addColumn({ role: "style" });
 		});
@@ -5037,7 +5065,7 @@ function drawChart(callback){
 		then=d.getTime();
 	}
 
-	console.info(subscriptions);
+	//console.info(subscriptions);
 
 	//map the graph data
 	Object.entries(graphData).forEach(([deviceIndex, attributes]) =>{
@@ -5094,6 +5122,7 @@ function drawChart(callback){
 					case "Max":	newEntry=maxEvents(current, next, adj_events, drop_val);	break;
 					case "Mid":	newEntry=midEvents(current, next, adj_events, drop_val);	break;
 					case "Sum":	newEntry=sumEvents(current, next, adj_events, drop_val);	break;
+					case "Median":	newEntry=medianEvents(current, next, adj_events, drop_val);	break;
 				}
 
 				if(drop_line != "true"){
@@ -5150,10 +5179,10 @@ function drawChart(callback){
 }
 
 function updateOverlay(deviceId, attribute, value){
-	console.log(deviceId+" "+attribute+" "+value);
+	//console.log(deviceId+" "+attribute+" "+value);
 	let searchString="#overlay-"+deviceId+"_"+attribute+"-number";
 	let val=parseFloat(value).toFixed(1)+" "+subscriptions.var[deviceId][attribute].units;
-	console.log(searchString);
+	//console.log(searchString);
 	jQuery(searchString).text(val);
 }
 
@@ -5164,9 +5193,9 @@ function placeMarker(dataTable){
 	let height=jQuery('#graph-overlay').outerHeight();
 	let overlay=options.overlays;
 
-	console.debug("Width =", width);
-	console.debug(chartArea);
-	console.debug(cli);
+	//console.debug("Width =", width);
+	//console.debug(chartArea);
+	//console.debug(cli);
 
 	switch (overlay.vertical_alignment){
 		case "Top":	document.querySelector('.overlay').style.top=Math.floor(chartArea.top) + "px"; + "px"; break;
