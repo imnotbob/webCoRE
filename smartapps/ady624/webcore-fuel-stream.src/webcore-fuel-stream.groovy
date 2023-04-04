@@ -1792,7 +1792,6 @@ List<Map> gtDataSourceData(Map ent, Boolean multiple=true, String sensorV=sNL){
 static String scriptIncludes(){
 	String html= """
 		<script src="https://code.jquery.com/jquery-3.5.0.min.js" integrity="sha256-xNzN2a4ltkB44Mc/Jz3pT4iU1cmeR0FkXs4pru/JxaQ=" crossorigin="anonymous"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.3/moment.min.js" integrity="sha256-7jipyThfvhNeS3Iv+glwpMOCkQ68sGHozhbb5mI4OCg=" crossorigin="anonymous"></script>
 		<script src="https://cdnjs.cloudflare.com/ajax/libs/he/1.2.0/he.min.js" integrity="sha256-awnFgdmMV/qmPoT6Fya+g8h/E4m0Z+UFwEHZck/HRcc=" crossorigin="anonymous"></script>
 		<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
 """
@@ -3690,12 +3689,12 @@ function drawChart(now, min, callback){
 
 		dataTable.addRows(newArr.map((parsed) => [
 			subscriptions.labels[id][attribute].replace('%deviceName%', name).replace('%attributeName%', attribute),
-			moment(parsed.start).toDate(),
-			moment(parsed.end).toDate(),
+			new Date(parsed.start),
+			new Date(parsed.end),
 			getToolTip(
 					subscriptions.labels[id][attribute].replace('%deviceName%', name).replace('%attributeName%', attribute),
-					moment(parsed.start).toDate(),
-					moment(parsed.end).toDate() )
+					new Date(parsed.start),
+					new Date(parsed.end) )
 		]));
 
 	});
@@ -4728,14 +4727,14 @@ function parseEvent(event){
 
 		let attribute=event.name;
 
-		let value = Number(event.value);
+		let value = parseFloat(event.value);
 
 		if (isNaN(value)) {
 			let stateName = event.value.replace(/ /g,'');
 			let state = subscriptions.states[deviceId][attribute][stateName];
 
 			if (state != undefined) {
-				value = Number(state);
+				value = parseFloat(state);
 			}
 		}
 
@@ -5144,7 +5143,7 @@ function drawChart(callback){
 		});
 	});
 
-	let parsedGraphData=Object.entries(accumData).map(([date, vals]) => [moment(parseInt(date)).toDate(), ...vals]);
+	let parsedGraphData=Object.entries(accumData).map(([date, vals]) => [new Date(parseInt(date)), ...vals]);
 
 	parsedGraphData.forEach(it =>{
 		dataTable.addRow(it);
@@ -5154,7 +5153,7 @@ function drawChart(callback){
 
 	let graphOptions=Object.assign({}, options.graphOptions);
 
-	graphOptions.hAxis=Object.assign(graphOptions.hAxis,{ viewWindow:{ min: moment(min).toDate(), max: moment(now).toDate() } });
+	graphOptions.hAxis=Object.assign(graphOptions.hAxis,{ viewWindow:{ min: new Date(min), max: new Date(now) } });
 
 	if(overlayEvent){
 		google.visualization.events.removeListener(overlayEvent);
@@ -7006,7 +7005,7 @@ function drawChart(callback){
 		});
 	});
 
-	parsedGraphData=parsedGraphData.map((it) => [ moment(it[0]).toDate(), ...it.slice(1).map((it) => parseFloat(it)) ]);
+	parsedGraphData=parsedGraphData.map((it) => [ new Date(it[0]), ...it.slice(1).map((it) => parseFloat(it)) ]);
 
 	parsedGraphData.forEach(it =>{
 		dataTable.addRow(it);
@@ -7015,7 +7014,7 @@ function drawChart(callback){
 
 	let graphOptions=Object.assign({}, options.graphOptions);
 
-	graphOptions.hAxis=Object.assign(graphOptions.hAxis,{ viewWindow:{ min: moment(min).toDate(), max: moment(now).toDate() } });
+	graphOptions.hAxis=Object.assign(graphOptions.hAxis,{ viewWindow:{ min: new Date(min), max: new Date(now) } });
 
 	if(callbackEvent){
 		google.visualization.events.removeListener(callbackEvent);
