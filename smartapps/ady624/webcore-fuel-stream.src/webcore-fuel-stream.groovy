@@ -4120,7 +4120,7 @@ def graphTimegraph(){
 
 					container << hubiForm_enum ((sTIT):			"Time Integration Function",
 							(sNM):			"var_${sa}_function".toString(),
-							list:			["Average", "Min", "Max", "Mid", "Sum", "Median"],
+							list:			["Average", "Min", "Max", "Mid", "Sum", "Median", "First", "Last"],
 							(sDEFLT):		"Average")
 
 					container << hubiForm_enum ((sTIT):			"Axis Side",
@@ -4351,7 +4351,7 @@ def graphTimegraph(){
 								String csi= settings[csin]
 								String csival= settings[csin+"_value"]
 								if(csi && csival){
-									String val=csi.replaceAll("\\s",sBLK)
+									String val=csi
 									possible_values << val
 									possible_custom_values << val
 									app.updateSetting("attribute_${sa}_${val}", csival)
@@ -4387,12 +4387,20 @@ def graphTimegraph(){
 									s0, false)
 						}
 
-						container << hubiForm_switch([(sTIT): "<b>Extend Left Value?</b><br><small>When values are unavailable, extend value to left</small>",
+						container << hubiForm_switch([(sTIT): "<b>Extend Left Value?</b><br><small>When values are unavailable at start of timespan, extend first value to left</small>",
 													  (sNM): "attribute_${sa}_extend_left", (sDEFLT): false, (sSUBONCHG): false])
 
-						container << hubiForm_switch([(sTIT): "<b>Extend Right Value?</b><br><small>When values are unavailable, extend value to right</small>",
+						container << hubiForm_switch([(sTIT): "<b>Extend Right Value?</b><br><small>When values are unavailable at end of timespan, extend last value to right</small>",
 													  (sNM): "attribute_${sa}_extend_right", (sDEFLT): false, (sSUBONCHG): false])
 
+						container << hubiForm_switch([(sTIT): "<b>Interpolate Left Value?</b><br><small>When values are unavailable at start of timespan, interpolate from first value to left edge</small>",
+													  (sNM): "attribute_${sa}_interp_left", (sDEFLT): false, (sSUBONCHG): false])
+
+					}else{
+						wremoveSetting("attribute_${sa}_drop_line")
+						wremoveSetting("attribute_${sa}_extend_left")
+						wremoveSetting("attribute_${sa}_extend_right")
+						wremoveSetting("attribute_${sa}_interp_left")
 					}
 
 					container << hubiForm_sub_section("Restrict Displayed Values")
@@ -4720,23 +4728,19 @@ function parseEvent(event){
 	const now=new Date().getTime();
 	let odeviceId=event.deviceId;
 	let deviceId="d"+odeviceId;
+	let attribute=event.name;
+	let value=event.value;
 
 	//only accept relevent events
+	if(subscriptions.ids.includes(deviceId) && subscriptions.attributes[deviceId].includes(attribute)){
 
-	if(subscriptions.ids.includes(deviceId) && subscriptions.attributes[deviceId].includes(event.name)){
+		let state = subscriptions.states?.[deviceId]?.[attribute]?.[value];
 
-		let attribute=event.name;
-
-		let value = parseFloat(event.value);
-
-		if (isNaN(value)) {
-			let stateName = event.value.replace(/ /g,'');
-			let state = subscriptions.states[deviceId][attribute][stateName];
-
-			if (state != undefined) {
-				value = parseFloat(state);
-			}
+		if (state !== undefined) {
+			value = state;
 		}
+
+		value = parseFloat(value);
 
 		if (subscriptions.drop[deviceId][attribute].restrict_bad &&
 			 (isNaN(value) ||
@@ -4994,6 +4998,22 @@ function medianEvents(minTime, maxTime, data, drop_val){
 		return{ date: minTime+((maxTime - minTime)/2), value: drop_val };
 }
 
+function firstEvents(minTime, maxTime, data, drop_val){
+	const matches=data.filter(it => it.date > minTime && it.date <= maxTime);
+	if(matches.length != 0)
+		return{ date: minTime+((maxTime - minTime)/2), value: matches[0].value };
+	else
+		return{ date: minTime+((maxTime - minTime)/2), value: drop_val };
+}
+
+function lastEvents(minTime, maxTime, data, drop_val){
+	const matches=data.filter(it => it.date > minTime && it.date <= maxTime);
+	if(matches.length != 0)
+		return{ date: minTime+((maxTime - minTime)/2), value: matches[matches.length - 1].value };
+	else
+		return{ date: minTime+((maxTime - minTime)/2), value: drop_val };
+}
+
 
 function getStyle(deviceIndex, attribute){
 
@@ -5075,9 +5095,11 @@ function drawChart(callback){
 			let func=subscriptions.var[deviceIndex][attribute].function;
 			let num_events=events.length;
 			let first_valid_index = events.findIndex(it => it.date > then);  // Index of the first event that is in the timespan.
+			let last_invalid_index = (first_valid_index >= 0) ? first_valid_index-1 : num_events-1;
 
-			extend_left=subscriptions.extend[deviceIndex][attribute].left;
-			extend_right=subscriptions.extend[deviceIndex][attribute].right;
+			let extend_left=subscriptions.extend[deviceIndex][attribute].left;
+			let extend_right=subscriptions.extend[deviceIndex][attribute].right;
+			let interp_left=subscriptions.extend[deviceIndex][attribute].interp;
 			let drop_line=subscriptions.drop[deviceIndex][attribute].valid;
 			let drop_val=null;
 			let newEntry=undefined;
@@ -5088,15 +5110,13 @@ function drawChart(callback){
 			} else if (first_valid_index>=0 && extend_left){
 				drop_val=events[first_valid_index].value;
 
-			} else if ((first_valid_index > 0)                                // We have a data point that is before the timespan
-						                                                      //   and the graph type is line or area
-					   && ['Line', 'Area'].includes(subscriptions.graph_type[deviceIndex][attribute])
-					   && (events[first_valid_index].date >= then + spacing)  //   and the first valid data point is not in the first bucket
-					   && (func == "Average")) {                              //   and the func is Average
+			} else if (interp_left                                                 // Left interpolation is enabled
+					   && (first_valid_index > 0)                                  //   and we have a data point that is before the timespan
+					   && (events[first_valid_index].date > then + (spacing / 2))  //   and the first valid data point is not in the first bucket
+					) {
 
 				// Replace the last data item that is before the timespan with a dummy data item at the start of the timespan,
 				//   having a value interpolated between the last data item that is not in the timespan and the first one that is.
-				let last_invalid_index = first_valid_index - 1;
 				let dummy_date = then;
 				let dummy_value = events[last_invalid_index].value + ((events[first_valid_index].value - events[last_invalid_index].value) *
 								  (dummy_date - events[last_invalid_index].date) / (events[first_valid_index].date - events[last_invalid_index].date))
@@ -5113,7 +5133,7 @@ function drawChart(callback){
 			// Loop through each time bucket, creating a single data point for the bucket from all of the events that are in the bucket.
 			while (current < now){
 				if(subscriptions.graph_type[deviceIndex][attribute] == "Stepped"){
-					drop_val=newEntry?.value ?? events[0]?.value ?? null;
+					drop_val=newEntry?.value ?? events[last_invalid_index]?.value ?? null;
 				}
 				next=current+spacing;
 
@@ -5124,6 +5144,8 @@ function drawChart(callback){
 					case "Mid":	newEntry=midEvents(current, next, adj_events, drop_val);	break;
 					case "Sum":	newEntry=sumEvents(current, next, adj_events, drop_val);	break;
 					case "Median":	newEntry=medianEvents(current, next, adj_events, drop_val);	break;
+					case "First":	newEntry=firstEvents(current, next, adj_events, drop_val);	break;
+					case "Last":	newEntry=lastEvents(current, next, adj_events, drop_val);	break;
 				}
 
 				if(drop_line != "true"){
@@ -5332,7 +5354,8 @@ Map getSubscriptions_timegraph(){
 			extend_[sid]= extend_[sid] ?: [:]
 			extend_[sid][attr]=[
 					right: settings["attribute_${sa}_extend_right"],
-					left: settings["attribute_${sa}_extend_left"]
+					left: settings["attribute_${sa}_extend_left"],
+					interp: settings["attribute_${sa}_interp_left"]
 			]
 
 			graph_type_[sid]= graph_type_[sid] ?: [:]
@@ -5358,8 +5381,11 @@ Map getSubscriptions_timegraph(){
 		}
 	}
 
+	Integer logging_ = state[sLOGNG]
+
 	Map subscriptions=[
 		(sID): isPoll ? 'poll' : 'sensor',
+		logging: logging_,
 		ids: ids, //.sort(),
 		sensors: sensors_,
 		attributes: attributes,
