@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update July 25, 2023 for Hubitat
+ * Last update July 27, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230725_HE'
+@Field static final String sHVER='v0.3.114.20230727_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -49,6 +49,8 @@ import groovy.transform.Field
 
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
+import java.time.*
+import java.time.temporal.TemporalAdjusters
 import java.util.concurrent.Semaphore
 
 definition(
@@ -503,12 +505,14 @@ static Boolean eric1(){ return false }
 @Field static final Integer i10=10
 @Field static final Integer i11=11
 @Field static final Integer i12=12
+@Field static final Integer i13=13
 @Field static final Integer i15=15
 @Field static final Integer i16=16
 @Field static final Integer i20=20
 @Field static final Integer i32=32
 @Field static final Integer i34=34
 @Field static final Integer i50=50
+@Field static final Integer i60=60
 @Field static final Integer i100=100
 @Field static final Integer i200=200
 @Field static final Integer i204=204
@@ -1972,7 +1976,7 @@ static Semaphore sema(Integer snum){
 		case i10: return theLock10FLD
 		case i11: return theLock11FLD
 		case i12: return theLock12FLD
-		case 13: return theLock13FLD
+		case i13: return theLock13FLD
 		case 14: return theLock14FLD
 		case i15: return theLock15FLD
 		case i16: return theLock16FLD
@@ -2259,23 +2263,15 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 		l0=liMs(aS,sLOGS); t1[sLOGS]=l0 ? []+l0:[]
 		m0=mMs(aS,sVARS); t1[sVARS]=m0 ? [:]+m0:[:]
 
-		String tzid= sMs(aS,sTZ)
-		TimeZone tz; tz=null
-		if(tzid){
-			try{
-				tz= TimeZone.getTimeZone(tzid)
-			} catch(ignored){
-				wstateRemove(sTZ)
-			}
-		}
-		t1[sTZ]=tz ?: mTZ()
+		Boolean a
+		a=loadTZs(t1,sMs(aS,sTZ))
 
 		t1[sMEM]=mem()
 		resetRandomValues(t1)
 		def devs=gtSetting(sDV)
 		t1[sDEVS]=devs && devs instanceof List ? ((List)devs).collectEntries{ Object it -> [(hashD(t1,it)):it]}:[:]
 
-		Boolean a=(Boolean)gtSetting(sLOGHE)
+		a=(Boolean)gtSetting(sLOGHE)
 		if(a)t1[sLOGHE]=true
 
 		Integer mS,st,at1
@@ -4534,6 +4530,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	Integer interval=tintvl
 	String intervlUnit=sMvt(tlo)
 	level=iZ
+
 	Long delta,time,rightNow,nxtSchd
 	delta=lZ
 	switch(intervlUnit){
@@ -4601,11 +4598,11 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 			Long thisDay=Math.floor((time/dMSDAY).toDouble()).toLong()
 			if(lge) myDetail r9,mySt1+"time: $time rightNow: $rightNow lastDay: $lastDay thisDay: $thisDay",iN2
 
-			Date adate=new Date(time)
-			Integer dyYear=adate.year
-			Integer dyMon=adate.month
-			Integer dyDay=adate.day
-			if(lge) myDetail r9,mySt1+"dyYear: $dyYear dyMon: $dyMon dyDay: $dyDay date: $adate",iN2
+			ZonedDateTime zdt,nzdt; zdt = localDate(r9,time)
+			Integer dyYear= zdt.getYear() - 1900
+			Integer dyMon= zdt.getMonth().getValue()-i1
+			Integer dyDay= zdt.getDayOfWeek().getValue() % i7
+			if(lge) myDetail r9,mySt1+"dyYear: $dyYear dyMon: $dyMon dyDay: $dyDay ZonedDate: $zdt",iN2
 
 			//the repeating interval is not necessarily constant
 			switch(intervlUnit){
@@ -4634,19 +4631,19 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 					def odw=oMs(tlo,sODW)
 					Integer omy=intervlUnit==sY ? icast(r9,oMs(tlo,sOMY)):iZ
 					Integer day,year,month
-					Date date= new Date(time)
-					year=dyYear //date.year
+					year=dyYear
 					month=Math.round((intervlUnit==sN ? dyMon /*date.month*/:omy)+(priorActivity ? interval:((nxtSchd<rightNow)? d1:dZ))*(intervlUnit==sN ? d1:i12)).toInteger()
 					if(month>=i12){
 						year+=Math.floor((month/i12).toDouble()).toInteger()
 						month=month%i12
 					}
 					if(lge) myDetail r9,mySt1+"month: $month year: $year ",iN2
-					date.setDate(i1)
-					date.setMonth(month)
-					date.setYear(year)
+					nzdt= zdt.withDayOfMonth(i1)
+					nzdt= nzdt.withMonth(month+i1)
+					nzdt= nzdt.withYear(year+1900)
 
-					Integer lastDayOfMonth= (new Date(date.year,date.month+i1,0)).date
+					Integer lastDayOfMonth= nzdt.with(TemporalAdjusters.lastDayOfMonth())
+							.getDayOfMonth()
 					if(odw==sD){
 						if(odm>iZ)day=(odm<=lastDayOfMonth)? odm:iZ
 						else{
@@ -4659,27 +4656,28 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 						//locate the nth week day of the month
 						if(odm>iZ){
 							//going forward
-							Integer firstDayOfMonthDOW=(new Date(date.year,date.month,1)).day
+							Integer firstDayOfMonthDOW= nzdt.getDayOfWeek().getValue() % i7
 							//locate the first matching day
 							Integer firstMatch=Math.round(i1+iodw-firstDayOfMonthDOW+(iodw<firstDayOfMonthDOW ? d7:dZ)).toInteger()
 							day=Math.round(firstMatch+d7*(odm-d1)).toInteger()
 							day=(day<=lastDayOfMonth)? day:iZ
 						}else{
 							//going backwards
-							Integer lastDayOfMonthDOW=(new Date(date.year,date.month+i1,0)).day
+							Integer lastDayOfMonthDOW= nzdt.with(TemporalAdjusters.lastDayOfMonth())
+									.getDayOfWeek().getValue() % i7
 							//locate the first matching day
 							Integer firstMatch=lastDayOfMonth+iodw-lastDayOfMonthDOW-(iodw>lastDayOfMonthDOW ? i7:iZ)
 							day=Math.round(firstMatch+d7*(odm+i1)).toInteger()
-							day=(day>=i1)? day:iZ
+							day=(day>=i1 && day<=lastDayOfMonth)? day:iZ
 						}
 					}
 					if(lge)
 						myDetail r9,mySt1+"odm: $odm odw: $odw omy: $omy day: $day month: $month year: $year",iN2
 					if(day){
-						date.setDate(day)
+						nzdt= nzdt.withDayOfMonth(day)
 						Long t0,t1
 						t0=time
-						t1=date.getTime()
+						t1= nzdt.toInstant().toEpochMilli()
 						nxtSchd=addTime(r9,t0,t1-t0,level)
 					}
 					break
@@ -4687,7 +4685,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 		}
 		//check to see if it fits the restrictions
 		if(nxtSchd>=rightNow){
-			if(lge)warn mySt1+"checking for schedule restrictions for $tlo",r9
+			if(lge)myDetail r9,mySt1+"checking for schedule restrictions for $tlo",iN2
 			Long offset=checkTimeRestrictions(r9,tlo,nxtSchd,level,interval)
 			if(offset==lZ){
 				if(lge)
@@ -4847,7 +4845,7 @@ private static List<Integer>listInt(Boolean a,Map operand,String k){
 }
 
 @CompileStatic
-private static Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,Integer interval){
+private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,Integer interval){
 	//returns 0 if restrictions are passed
 	//returns a positive number as millisecond offset to apply to nextSchedule for fast forwarding
 	//returns a negative number as a failed restriction with no fast forwarding offset suggestion
@@ -4867,13 +4865,14 @@ private static Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer l
 	List<Integer> omy= listInt((level<=i7), operand,sOMY)
 
 	if(om==null && oh==null && odw==null && odm==null && owm==null && omy==null)return lZ
-	Date date=new Date(time)
-	Integer dyYear=date.year
-	Integer dyMon=date.month
-	Integer dyDate=date.date
-	Integer dyDay=date.day
-	Integer dyHr=date.hours
-	Integer dyMins=date.minutes
+
+	ZonedDateTime zdt, nzdt; zdt = localDate(r9,time)
+	Integer dyYear= zdt.getYear() - 1900
+	Integer dyMon= zdt.getMonth().getValue()-i1
+	Integer dyDate= zdt.getDayOfMonth()
+	Integer dyDay= zdt.getDayOfWeek().getValue() % i7
+	Integer dyHr= zdt.getHour()
+	Integer dyMins= zdt.getMinute()
 
 	Double dminDay=1440.0D
 	Double dsecDay=86400.0D
@@ -4888,7 +4887,10 @@ private static Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer l
 		month=(tI.find{ Integer it -> it>dyMonPlus } ?: i12+tI[iZ]) -i1
 		Integer year=dyYear+(month>=i12 ? i1:iZ)
 		month=(month>=i12 ? month-i12:month)
-		Long ms=(new Date(year,month,1)).getTime()-time
+		nzdt= zdt.withYear(year+1900)
+		nzdt= nzdt.withMonth(month+i1)
+		nzdt= nzdt.withDayOfMonth(i1)
+		Long ms= nzdt.toInstant().toEpochMilli()-time
 		switch(level){
 			case i2: //by second
 				Double tt=Math.floor((ms/(d1000*interval)).toDouble())
@@ -4904,7 +4906,7 @@ private static Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer l
 
 	Double d7=7.0D
 	//week of month restrictions
-	if(owm!=null && !(owm.indexOf(getWeekOfMonth(date))>=iZ || owm.indexOf(getWeekOfMonth(date,true))>=iZ)){
+	if(owm!=null && !(owm.indexOf(getWeekOfMonth(zdt))>=iZ || owm.indexOf(getWeekOfMonth(zdt,true))>=iZ)){
 		switch(level){
 			case i2: //by second
 				Double tt= Math.floor( ( ( (d7-dyDay)*dsecDay -dyHr*dSECHR -dyMins*d60)/interval ).toDouble() )
@@ -4920,7 +4922,8 @@ private static Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer l
 
 	//day of month restrictions
 	if(odm!=null && odm.indexOf(dyDate)<iZ){
-		Integer lastDayOfMonth=new Date(dyYear,dyMonPlus,0).date
+		Integer lastDayOfMonth= zdt.with(TemporalAdjusters.lastDayOfMonth())
+				.getDayOfMonth()
 		if(odm.find{ Integer it -> it<1 }){
 			//we need to add the last days
 			odm= []+odm as List<Integer> //copy the array
@@ -4998,12 +5001,12 @@ private static Long pRes(Map r9,Long result){
  * return the number of occurrences of same day of week up until the date or from the end of the month if backwards,i.e. last Sunday is -1, second-last Sunday is -2
  */
 @CompileStatic
-private static Integer getWeekOfMonth(Date date,Boolean backwards=false){
-	Integer day=date.date
+//private static Integer getWeekOfMonth(Date date,Boolean backwards=false){
+private static Integer getWeekOfMonth(ZonedDateTime zdt,Boolean backwards=false){
+	Integer day= zdt.getDayOfMonth()
 	if(backwards){
-		Integer month=date.month
-		Integer year=date.year
-		Integer lastDayOfMonth=(new Date(year,month+i1,0)).date
+		Integer lastDayOfMonth= zdt.with(TemporalAdjusters.lastDayOfMonth())
+					.getDayOfMonth()
 		return -(i1+Math.floor( ((lastDayOfMonth-day)/i7).toDouble() ))
 	}else return i1+Math.floor(((day-i1)/i7).toDouble()) //1 based
 }
@@ -10695,9 +10698,9 @@ private static String buildList(List list,String suffix=sAND){
 	if(!list)return sBLK
 	Integer n,t0,t1
 	n=i1
-	String res; res=sBLK
 	t0=list.size()
 	t1=t0-i1
+	String res; res=sBLK
 	String a=sCOMMA+sSPC
 	for(item in list){
 		res+=item.toString()+(n<t0 ? (n==t1 ? sSPC+suffix+sSPC:a):sBLK)
@@ -10744,21 +10747,23 @@ private Map func_roundtimetominutes(Map r9,List<Map> prms){
 	Integer mins; mins= intEvalExpr(r9,prms[i1])
 	Boolean rndUp= boolEvalExpr(r9,prms[i2])
 
-	if(mins<i1 || mins>60) return rtnErr(err) // 1-60
-	if(mins!=i1 && mins%i5!=iZ) return rtnErr(err) // multiple of 5
+	if(mins<i1 || mins>i60) return rtnErr(err)
 
-	Calendar cal = Calendar.getInstance()
-	Date timestamp= new Date(value)
-	cal.setTime(timestamp)
-	cal.set(Calendar.MILLISECOND,iZ)
-	cal.set(Calendar.SECOND,iZ)
-	if(mins!=i1){
-		Integer currMinute = cal.get(Calendar.MINUTE)
-		Integer rMin; rMin = currMinute - (currMinute % mins)
-		if(rndUp) rMin += mins
-		cal.set(Calendar.MINUTE,rMin)
+	ZonedDateTime zdt, nzdt; zdt = localDate(r9,value)
+	nzdt= zdt.withNano(iZ)
+	nzdt= nzdt.withSecond(iZ)
+
+	Integer currMinute = nzdt.getMinute()
+	Integer mod= currMinute % mins
+	if(mod!=iZ){
+		Integer rMin; rMin= currMinute-mod
+		if(rndUp){
+			Integer nMin= rMin+mins
+			if(rMin>currMinute) nzdt.plusMinutes((nMin-currMinute).toLong())
+		}else nzdt= nzdt.minusMinutes((currMinute-rMin).toLong())
 	}
-	rtnMap(sDTIME, cal.getTime().getTime())
+
+	rtnMap(sDTIME, nzdt.toInstant().toEpochMilli())
 }
 
 /** setVariable assigns a variable
@@ -11775,16 +11780,16 @@ private Map func_date(Map r9,List<Map> prms){
 private Map func_time(Map r9,List<Map> prms){
 	Integer sz=prms.size()
 	if(badParams(r9,prms,iZ) || sz>i1)return rtnErr('time([value])')
-	Long value=sz>iZ ? longEvalExpr(r9,prms[iZ],sTIME) :(Long)cast(r9,wnow(),sTIME,sDTIME)
+	Long value=sz>iZ ? longEvalExpr(r9,prms[iZ],sTIME) : (Long)cast(r9,wnow(),sTIME,sDTIME)
 	rtnMap(sTIME,value)
 }
 
 private Map addtimeHelper(Map r9,List<Map> prms,Long mulp,String msg){
 	Integer sz=prms.size()
 	if(badParams(r9,prms,i1) || sz>i2)return rtnErr(msg)
-	Long value=sz==i2 ? longEvalExpr(r9,prms[iZ],sDTIME) :wnow()
-	Long delta=longEvalExpr(r9,(sz==i2 ? prms[i1]:prms[iZ]),sLONG) *mulp
-	Long res; res=value+delta
+	Long value=sz==i2 ? longEvalExpr(r9,prms[iZ],sDTIME) : wnow()
+	Long deltaMS=longEvalExpr(r9,(sz==i2 ? prms[i1]:prms[iZ]),sLONG) *mulp
+	Long res; res=value+deltaMS
 	TimeZone mtz=rTZ(r9)
 	res+=Math.round((mtz.getOffset(value)-mtz.getOffset(res))*d1)
 	return rtnMap(sDTIME,res)
@@ -11815,7 +11820,7 @@ private Map func_addweeks(Map r9,List<Map> prms){ return addtimeHelper(r9,prms,6
 private Map func_weekdayname(Map r9,List<Map> prms){
 	if(badParams(r9,prms,i1))return rtnErr('weekDayName(dateTimeOrWeekDayIndex)')
 	Long value=longEvalExpr(r9,prms[iZ],sLONG)
-	Integer index=((value>=lMSDAY)? utcToLocalDate(r9,value).day:value.toInteger()) % i7
+	Integer index= (value>=lMSDAY ? utcToLocalDate(r9,value).getDayOfWeek().getValue() : value.toInteger()) % i7
 	rtnMapS(weekDaysFLD[index])
 }
 
@@ -11824,7 +11829,7 @@ private Map func_weekdayname(Map r9,List<Map> prms){
 private Map func_monthname(Map r9,List<Map> prms){
 	if(badParams(r9,prms,i1))return rtnErr('monthName(dateTimeOrMonthNumber)')
 	Long value=longEvalExpr(r9,prms[iZ],sLONG)
-	Integer index=((value>=lMSDAY)? utcToLocalDate(r9,value).month: (value-l1).toInteger())%i12+i1
+	Integer index= (value>=lMSDAY ? utcToLocalDate(r9,value).getMonth().getValue() : value.toInteger()) % i13
 	rtnMapS(yearMonthsFLD[index])
 }
 
@@ -11880,9 +11885,9 @@ private Map func_formatduration(Map r9,List<Map> prms){
 	if(sign<iZ)value=-value
 	Integer ms=(value%i1000).toInteger()
 	value=Math.floor((value-ms)/d1000).toLong()
-	Integer s=(value%60).toInteger()
+	Integer s=(value%i60).toInteger()
 	value=Math.floor((value-s)/d60).toLong()
-	Integer m=(value%60).toInteger()
+	Integer m=(value%i60).toInteger()
 	value=Math.floor((value-m)/d60).toLong()
 	Integer h=(value%24).toInteger()
 	value=Math.floor((value-h)/24.0D).toLong()
@@ -11953,30 +11958,27 @@ private Map func_parsedatetime(Map r9,List<Map> prms){
 private Map func_settzid(Map r9,List<Map> prms){
 	Integer sz=prms.size()
 	if(badParams(r9,prms,i1) || sz>i1)return rtnErr('setTzid(tzid)')
-	String tzid= strEvalExpr(r9,prms[iZ])
+	String id= strEvalExpr(r9,prms[iZ])
 
 	String rtn= TZID(rTZ(r9))
-	TimeZone tz; tz=null
-	if(tzid){
-		try{
-			tz= TimeZone.getTimeZone(tzid)
-		}catch(all){
-			return rtnErr("$all $tzid".toString())
-		}
+	Boolean a; a=true
+	if(id){
+		a=loadTZs(r9,id)
 	}
-	if(tzid && tz){
-		r9[sTZ]= tz
-		if(TZID(tz) != TZID(mTZ())) state[sTZ]=tzid
-		else wstateRemove(sTZ)
-	} else return rtnErr("bad tzid $tzid".toString())
+	String tz1= TZID(rTZ(r9))
+	String zid1= ZID(mZ(r9))
+	if(!a || tz1!=zid1 || id!=tz1){
+		return rtnErr("bad tzid $id".toString())
+	}
+
 	rtnMapS(rtn)
 }
 
 /** formatDateTime returns a datetime in a readable format				**/
-/** Usage: formatDateTime(value[, format, tzid])						**/
+/** Usage: formatDateTime(value[, format [, tzid]])						**/
 private Map func_formatdatetime(Map r9,List<Map> prms){
 	Integer sz=prms.size()
-	if(badParams(r9,prms,i1) || sz>i3)return rtnErr('formatDateTime(value[, format, tzid])')
+	if(badParams(r9,prms,i1) || sz>i3)return rtnErr('formatDateTime(value[, format [, tzid]])')
 	Long value=longEvalExpr(r9,prms[iZ],sDTIME)
 	String format=sz>i1 ? strEvalExpr(r9,prms[i1]):sNL
 	String tzid=sz>i2 ? strEvalExpr(r9,prms[i2]):sNL
@@ -11987,7 +11989,7 @@ private Map func_formatdatetime(Map r9,List<Map> prms){
 		try{
 			tz= TimeZone.getTimeZone(tzid)
 		}catch(all){
-			return rtnErr("$all $format $value".toString())
+			return rtnErr("$all $format $value $tzid".toString())
 		}
 	}
 	tz=tz ?: mTZ()
@@ -12387,8 +12389,8 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 			Long d
 			d=srcDt==sSTR ? stringToTime(r9,value):((Number)value).toLong()
 			if(d<lMSDAY)return d
-			Date t1=new Date(d)
-			d=Math.round((t1.hours*dSECHR+t1.minutes*d60+t1.seconds)*d1000)
+			ZonedDateTime zdt= localDate(r9,d)
+			d=Math.round((zdt.getHour()*dSECHR+zdt.getMinute()*d60+zdt.getSecond())*d1000)
 			return d
 		case sDATE:
 		case sDTIME:
@@ -12400,12 +12402,12 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 			}
 			d=srcDt==sSTR ? stringToTime(r9,value):(Long)value
 			if(dataType==sDATE){
-				Date t1= new Date(d)
-				// take ms off and first guess at midnight
-				Long td= Math.round( (Math.floor(d/d1000)*d1000)-((t1.hours*dSECHR+t1.minutes*d60+t1.seconds)*d1000))
-				// could be earlier/later depending if DST change day
-				TimeZone mtz=rTZ(r9)
-				d=Math.round( (td-(mtz.getOffset(td)-mtz.getOffset(d)) ) *d1)
+				ZonedDateTime zdt,nzdt; zdt= localDate(r9,d)
+				nzdt= zdt.withNano(iZ)
+				nzdt= nzdt.withSecond(iZ)
+				nzdt= nzdt.withMinute(iZ)
+				nzdt= nzdt.withHour(iZ)
+				d= nzdt.toInstant().toEpochMilli()
 			}
 			return d
 		case sVEC:
@@ -12457,7 +12459,7 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 @CompileStatic
 private Long elapseT(Long t,Long n=wnow()){ return Math.round(d1*n-t) }
 
-private Date utcToLocalDate(Map r9,dateOrTimeOrString=null){ // cast to Date
+private ZonedDateTime utcToLocalDate(Map r9,dateOrTimeOrString=null){
 	def mdate=dateOrTimeOrString
 	Long ldate
 	if(!(mdate instanceof Long)){
@@ -12471,14 +12473,20 @@ private Date utcToLocalDate(Map r9,dateOrTimeOrString=null){ // cast to Date
 	if(ldate==null || ldate==lZ){
 		ldate=wnow()
 	}
-	//HE defaults TZ to timezone of hub
-	return new Date(ldate)
+	return localDate(r9,ldate)
 }
 
-private static Date localDate(){ return new Date() }
+private ZonedDateTime localDate(Map r9, Long n=wnow()){
+	ZonedDateTime zdt = Instant.ofEpochMilli( n )
+			.atZone( mZ(r9) )
+	return zdt
+}
 
+/**
+ * convert to dtime (UTC)
+ */
 @CompileStatic
-private Long stringToTime(Map r9,dateOrTimeOrString){ // convert to dtime
+private Long stringToTime(Map r9,dateOrTimeOrString){
 	Long lnull=(Long)null
 	Long result
 	result=lnull
@@ -12620,22 +12628,16 @@ private Long stringToTime(Map r9,dateOrTimeOrString){ // convert to dtime
 
 				if(hasMeridian && time){
 					n=i11
-					Date t1=new Date(time)
-					Integer hr
-					hr=t1.hours
-					Integer min=t1.minutes
-					Integer sec=t1.seconds
-					Boolean twelve=hr>=i12
-					if(twelve && hasAM)hr-=i12
-					if(!twelve && hasPM)hr+=i12
-					String str1,str2
-					str1="${hr}".toString()
-					str2="${min}".toString()
-					if(hr<i10)str1=String.format('%02d',hr)
-					if(min<i10)str2=String.format('%02d',min)
-					String str=str1+sCLN+str2
-					time=wtimeToday(str,tz).getTime()
-					if(sec!=iZ)time+=sec*i1000
+					ZonedDateTime zdt,nzdt; zdt= localDate(r9,time)
+					Integer hr,nhr; hr=zdt.getHour()
+					nhr= hr
+					Boolean twelve= hr>=i12
+					if(twelve && hasAM)nhr-=i12
+					if(!twelve && hasPM)nhr+=i12
+					if(hr!=nhr){
+						nzdt= zdt.withHour(nhr)
+						time= nzdt.toInstant().toEpochMilli()
+					}
 				}
 				result=time ?: lZ
 			}catch(ignored){ result=lnull }
@@ -12649,7 +12651,7 @@ private Long stringToTime(Map r9,dateOrTimeOrString){ // convert to dtime
 		}
 	}
 	if(result==lnull){
-		n=13
+		n=i13
 		result=lZ
 	}
 	//if(eric1() && ((String)gtSetting(sLOGNG))?.toInteger()>i2)
@@ -12993,6 +12995,7 @@ private Map initSunrSunst(Map r9){
 	String ty=sSUNT
 	Map t0; t0=svSunTFLD
 	Long t; t=wnow()
+	//mTZ()
 	if(t0!=null){
 		if(t<lMs(t0,sNEXTM)){
 			r9[ty]=[:]+t0
@@ -13088,9 +13091,54 @@ private Long getSunsetTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,sTSE
 private Long getNextSunriseTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'tomorrowssunrise') }
 private Long getNextSunsetTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'tomorrowssunset') }
 
+private Boolean loadTZs(Map r9,String id){
+	try{
+		TimeZone ntz= loadTZ(id)
+		ZoneId nid= loadZID(id)
+		String tz1= TZID(ntz)
+		String zid1= ZID(nid)
+		if(tz1!=zid1) warn "tz ($tz1) and zoneid ($zid1) do not match",r9
+		else{
+			r9[sTZ]= ntz
+			r9['zoneid']= nid
+			if(id && id!=TZID(mTZ())){
+				state[sTZ]= id
+			}else{
+				wstateRemove(sTZ)
+			}
+			return true
+		}
+	}catch(e){
+		wstateRemove(sTZ)
+		error "loadTZs failed",r9,iN2,e
+	}
+	return false
+}
+
 private static TimeZone mTZ(){ return TimeZone.getDefault() }
 private static TimeZone rTZ(Map r9){ return (TimeZone)r9[sTZ] ?: mTZ() }
-private static String TZID(TimeZone tz){ return (String)tz.getID() }
+private static String TZID(TimeZone tz){ return tz.getID() }
+private static TimeZone loadTZ(String tzid){
+	TimeZone tz; tz=null
+	if(tzid){
+		tz= TimeZone.getTimeZone(tzid)
+	}
+	return tz ?: mTZ()
+}
+
+private static ZoneId myZone(){ return ZoneId.systemDefault() }
+/**
+ * return current ZoneId for piston
+ */
+private static ZoneId mZ(Map r9){ return (ZoneId)r9['zoneid'] ?: myZone() }
+private static String ZID(ZoneId z){ return z.getId() }
+private static ZoneId loadZID(String zidS){
+	ZoneId zid; zid=null
+	if(zidS){
+		zid= ZoneId.of(zidS)
+	}
+	return  zid ?: myZone()
+}
 
 private Long getMidnightTime(TimeZone tz){ return wtimeToday('00:00',tz).getTime() }
 private Long getNextMidnightTime(TimeZone tz){ return wtimeTodayAfter('23:59','00:00',tz).getTime() }
@@ -13098,7 +13146,8 @@ private Long getNoonTime(TimeZone tz){ return wtimeToday('12:00',tz).getTime() }
 private Long getNextNoonTime(TimeZone tz){ return wtimeTodayAfter('23:59','12:00',tz).getTime() }
 
 
-// This is trying to ensure to not fire sunsets or sunrises twice in same day by ensuring we fire a bit later than actual sunrise or sunset
+// trying to ensure to not fire sunsets or sunrises twice in same day by ensuring we fire a bit later than actual sunrise or sunset
+// tied to hub local area
 Long getSkew(Long t4,String ttyp){
 	Date t1=new Date(t4)
 	Integer curMon
@@ -13200,20 +13249,20 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 	LinkedHashMap t=[:] as LinkedHashMap
 	String shsm=sDLR+sHSMSTS
 	return [
-		'$locationMode':t+strT,
 		(sDLLRDEVICE):rtnMap(sDEV,null),
 		(sDLLRDEVS):rtnMap(sDEV,null),
 		(sDLLRINDX):rtnMapD(null),
-		'$location':rtnMap(sDEV,null),
-		'$now':t+dtimeT,
-		'$localNow':t+dtimeT,
-		'$utc':t+dtimeT,
-
 		(sDARGS):t+dynT,
 		(sDJSON):t+dynT,
+		(sDRESP):t+dynT,
+		'$locationMode':t+strT,
+		'$location':rtnMap(sDEV,null),
+		'$now':t+dtimeT,
+		'$localNow':t+dtimeT, // in UI as long
+		'$utc':t+dtimeT, // in UI as long
+
 		'$places':t+dynT,
 		'$file':t+dynT,
-		(sDRESP):t+dynT,
 		'$weather':t+dynT,
 		'$incidents':t+dynT,
 		'$hsmTripped':t+boolT,
@@ -13221,6 +13270,7 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 
 		'$fuel':t+dynT,
 		'$rooms':t+dynT,
+		'$roomids':t+dynT,
 		(sHTTPCNTN):t+strT,
 		(sHTTPCODE):t+intT,
 		(sHTTPOK):t+boolT,
@@ -13293,10 +13343,17 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 		'$randomSaturation':t+intT,
 		'$randomHue':t+intT,
 		'$temperatureScale':t+strT,
+
 		'$tzName':t+strT,
 		'$tzId':t+strT,
 		'$tzOffset':t+intT,
 		'$tzInDst':t+boolT,
+
+//		'$zoneName':t+strT,
+		'$zoneId': t+strT,
+		'$zoneOffset': t+intT,
+		'$zoneInDst': t+boolT,
+
 		'$version':t+strT,
 		'$versionH':t+strT,
 		'$nfl':t+dynT
@@ -13319,22 +13376,34 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 	Map ce=mMs(r9,sCUREVT) ?: [:]
 	Map pe=mMs(r9,sPREVEVT) ?: [:]
 	switch(name){
-		case '$locationMode':return gtLMode()
-		case '$localNow':
-		case '$now':
-		case '$utc': return wnow()
 		case sDARGS:
 		case sDLLRDEVICE:
 		case sDLLRDEVS:
-		case sDLLRINDX:
+		case sDLLRINDX: return oMv(sv[name])
+		case sDJSON: return rtnStr(r9[sJSON],frcStr)
+		case sDRESP: return rtnStr(r9[sRESP],frcStr)
 		case sHTTPCNTN:
 		case sHTTPCODE:
 		case sHTTPOK:
 		case sIFTTTCODE:
 		case sIFTTTOK: return oMv(sv[name])
+		case '$locationMode':return gtLMode()
+		case '$localNow':	// in UI as long
+		case '$utc':		// UI special displays with proper locale
+		case '$now':
+			return wnow()
 		case '$file': String pNm=sMs(r9,snId); return readDataFLD[pNm]
 		case '$fuel': String pNm=sMs(r9,snId); return fuelDataFLD[pNm]
 		case '$rooms': return rtnStr(gtRooms(r9),frcStr)
+		case '$roomids':
+			List<String> r; r=[]
+			Map<String,Map> rms = gtRooms(r9)
+			if(rms){
+				for(Map.Entry<String,Map> a in rms){
+					r.push(a.key)
+				}
+			}
+			return rtnStr(r)
 		case sCURATTR: return rtnStr(ce[sNM])
 		case sCURDESC: return rtnStr(ce[sDESCTXT])
 		case sCURDATE: return ce[sT]
@@ -13344,10 +13413,8 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case sCURPHYS: return ce[sPHYS]
 		case sCURVALUE: return ce[sVAL]
 		case sCURUNIT: return ce[sUNIT]
-		case sDJSON: return rtnStr(r9[sJSON],frcStr)
 		case '$lastexecuted': return lMs(r9,sLEXEC)
 		case '$places': return rtnStr(mMs(r9,sSETTINGS)?.places)
-		case sDRESP: return rtnStr(r9[sRESP],frcStr)
 		case '$weather': return rtnStr(r9['weather'],frcStr)
 		case '$nfl': return rtnStr(r9.nfl)
 		case '$incidents': return rtnStr(r9[sINCIDENTS],frcStr)
@@ -13368,27 +13435,34 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case sPEVUNIT: return pe[sUNIT]
 		case '$name': return gtAppN()
 		case '$state': return (String)((Map)r9[sST])?.new
+
 		case '$tzName': return rTZ(r9).displayName
 		case '$tzId': return TZID(rTZ(r9))
 		case '$tzOffset': return rTZ(r9).getOffset(wnow())
 		case '$tzInDst': return rTZ(r9).inDaylightTime(new Date(wnow()))
+
+		//case '$zoneName': return mZ(r9).getDisplayName(TextStyle.FULL_STANDALONE,Locale.US)
+		case '$zoneId': return ZID(mZ(r9))
+		case '$zoneOffset': return mZ(r9).getRules().getOffset(Instant.ofEpochMilli(wnow())).getTotalSeconds()*1000L
+		case '$zoneInDst': return mZ(r9).getRules().isDaylightSavings(Instant.ofEpochMilli(wnow()))
+
 		case '$version': return sVER
 		case '$versionH': return sHVER
-		case '$hour': Integer h=localDate().hours; return (h==iZ ? i12:(h>i12 ? h-i12:h))
-		case '$hour24': return localDate().hours
-		case '$minute': return localDate().minutes
-		case '$second': return localDate().seconds
+		case '$hour': Integer h=localDate(r9).getHour(); return (h==iZ ? i12:(h>i12 ? h-i12:h))
+		case '$hour24': return localDate(r9).getHour()
+		case '$minute': return localDate(r9).getMinute()
+		case '$second': return localDate(r9).getSecond()
 		case '$zipCode': return gtLzip()
 		case '$latitude': return gtLlat()
 		case '$longitude': return gtLlong()
-		case '$meridian': Integer h=localDate().hours; return (h<i12 ? 'AM':'PM')
-		case '$meridianWithDots': Integer h=localDate().hours; return (h<i12 ? 'A.M.':'P.M.')
-		case '$day': return localDate().date
-		case '$dayOfWeek': return localDate().day
-		case '$dayOfWeekName': return weekDaysFLD[localDate().day]
-		case '$month': return localDate().month+i1
-		case '$monthName': return yearMonthsFLD[localDate().month+i1]
-		case '$year': return localDate().year+1900
+		case '$meridian': Integer h=localDate(r9).getHour(); return (h<i12 ? 'AM':'PM')
+		case '$meridianWithDots': Integer h=localDate(r9).getHour(); return (h<i12 ? 'A.M.':'P.M.')
+		case '$day': return localDate(r9).getDayOfMonth()
+		case '$dayOfWeek': return localDate(r9).getDayOfWeek().getValue() % i7
+		case '$dayOfWeekName': return weekDaysFLD[localDate(r9).getDayOfWeek().getValue() % i7]
+		case '$month': return localDate(r9).getMonth().getValue()
+		case '$monthName': return yearMonthsFLD[localDate(r9).getMonth().getValue()]
+		case '$year': return localDate(r9).getYear()
 		case '$midnight': return getMidnightTime(rTZ(r9))
 		case '$noon': return getNoonTime(rTZ(r9))
 		case '$sunrise': return getSunriseTime(r9)
@@ -13399,8 +13473,8 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case '$nextNoon': return getNextNoonTime(rTZ(r9))
 		case '$nextSunrise': return getNextSunriseTime(r9)
 		case '$nextSunset': return getNextSunsetTime(r9)
-		case '$time': Date t=localDate(); Integer h=t.hours; Integer m=t.minutes; return ((h==iZ ? i12:(h>i12 ? h-i12:h))+sCLN+(m<i10 ? "0$m":"$m")+sSPC+(h<i12 ? 'A.M.':'P.M.')).toString()
-		case '$time24': Date t=localDate(); Integer h=t.hours; Integer m=t.minutes; return (h+sCLN+(m<i10 ? "0$m":"$m")).toString()
+		case '$time': ZonedDateTime t=localDate(r9); Integer h=t.getHour(); Integer m=t.getMinute(); return ((h==iZ ? i12:(h>i12 ? h-i12:h))+sCLN+(m<i10 ? "0$m":"$m")+sSPC+(h<i12 ? 'A.M.':'P.M.')).toString()
+		case '$time24': ZonedDateTime t=localDate(r9); Integer h=t.getHour(); Integer m=t.getMinute(); return (h+sCLN+(m<i10 ? "0$m":"$m")).toString()
 		case '$random':
 			def tresult=getRandomValue(r9,name)
 			Double result
@@ -13574,8 +13648,8 @@ Map fixHeGType(Map r9,Boolean toHubV,String typ,v){
 						Long a1=t0+aaa
 						myv=a1+(tz.getOffset(t0)-tz.getOffset(a1))
 					}else{
-						Date t1=new Date(aaa)
-						Long t2=Math.round((t1.hours*dSECHR+t1.minutes*d60+t1.seconds)*d1000)
+						ZonedDateTime zdt= localDate(r9,aaa)
+						Long t2=Math.round((zdt.getHour()*dSECHR+zdt.getMinute()*d60+zdt.getSecond())*d1000)
 						myv=t2
 					}
 				}else if(eric()) warn "trying to convert nonnumber time",null
@@ -13666,7 +13740,8 @@ Map fixHeGType(Map r9,Boolean toHubV,String typ,v){
 				if(tt1!=null){
 					lres=tt1.getTime()
 					if(mtyp==sTIME){
-						Long m2=Math.round((tt1.hours*dSECHR+tt1.minutes*d60+tt1.seconds)*d1000)
+						ZonedDateTime zdt= localDate(r9,lres)
+						Long m2=Math.round((zdt.getHour()*dSECHR+zdt.getMinute()*d60+zdt.getSecond())*d1000)
 						lres=m2
 					}
 				}
