@@ -10759,7 +10759,7 @@ private Map func_roundtimetominutes(Map r9,List<Map> prms){
 		Integer rMin; rMin= currMinute-mod
 		if(rndUp){
 			Integer nMin= rMin+mins
-			if(rMin>currMinute) nzdt= nzdt.plusMinutes((nMin-currMinute).toLong())
+			nzdt= nzdt.plusMinutes((nMin-currMinute).toLong())
 		}else nzdt= nzdt.minusMinutes((currMinute-rMin).toLong())
 	}
 
