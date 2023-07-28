@@ -10755,13 +10755,11 @@ private Map func_roundtimetominutes(Map r9,List<Map> prms){
 
 	Integer currMinute = nzdt.getMinute()
 	Integer mod= currMinute % mins
-	if(mod!=iZ){
-		Integer rMin; rMin= currMinute-mod
-		if(rndUp){
-			Integer nMin= rMin+mins
-			nzdt= nzdt.plusMinutes((nMin-currMinute).toLong())
-		}else nzdt= nzdt.minusMinutes((currMinute-rMin).toLong())
-	}
+	Integer rMin; rMin= currMinute-mod
+	if(rndUp){
+		Integer nMin= rMin+mins
+		nzdt= nzdt.plusMinutes((nMin-currMinute).toLong())
+	}else nzdt= nzdt.minusMinutes((currMinute-rMin).toLong())
 
 	rtnMap(sDTIME, nzdt.toInstant().toEpochMilli())
 }
