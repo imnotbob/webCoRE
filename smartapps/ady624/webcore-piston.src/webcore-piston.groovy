@@ -10728,15 +10728,15 @@ private Map func_roundtimetominutes(Map r9,List<Map> prms){
 
 	ZonedDateTime zdt, nzdt; zdt = localDate(r9,value)
 	nzdt= zdt.withNano(iZ)
-	nzdt= nzdt.withSecond(iZ)
+	nzdt= nzdt.withSecond(iZ) // this is rounding down
 
 	Integer currMinute = nzdt.getMinute()
 	Integer mod= currMinute % mins
 	Integer rMin; rMin= currMinute-mod
 	if(rndUp){
-		Integer nMin= rMin+mins
+		Integer nMin=rMin+mins
 		nzdt= nzdt.plusMinutes((nMin-currMinute).toLong())
-	}else nzdt= nzdt.minusMinutes((currMinute-rMin).toLong())
+	} else if(mod!=iZ) nzdt= nzdt.minusMinutes((currMinute-rMin).toLong())
 
 	rtnMap(sDTIME, nzdt.toInstant().toEpochMilli())
 }
