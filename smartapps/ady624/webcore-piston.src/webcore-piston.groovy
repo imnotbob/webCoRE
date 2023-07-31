@@ -10732,11 +10732,11 @@ private Map func_roundtimetominutes(Map r9,List<Map> prms){
 
 	Integer currMinute = nzdt.getMinute()
 	Integer mod= currMinute % mins
-	Integer rMin; rMin= currMinute-mod
+	Integer addm; addm=iZ
+	if(mod!=iZ){ addm= mins-mod	}
 	if(rndUp){
-		Integer nMin=rMin+mins
-		nzdt= nzdt.plusMinutes((nMin-currMinute).toLong())
-	} else if(mod!=iZ) nzdt= nzdt.minusMinutes((currMinute-rMin).toLong())
+		nzdt= nzdt.plusMinutes(addm.toLong())
+	} else nzdt= nzdt.minusMinutes(addm.toLong())
 
 	rtnMap(sDTIME, nzdt.toInstant().toEpochMilli())
 }
