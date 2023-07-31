@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update July 20, 2023 for Hubitat
+ *  Last update July 31, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -14170,7 +14170,7 @@ private static Long lMs(Map m,String v){ (Long)m[v] }
 @CompileStatic
 private static Long lMt(Map m){ (Long)m[sT] }
 
-private Map timer(String message,Map r9,Integer shift=iN2,err=null){ log(message,r9,shift,err,sTIMER)}
+private Map timer(String message,Map r9,Integer shift=iN2,Exception err=null){ log(message,r9,shift,err,sTIMER)}
 
 @Field static final String sLTH='<'
 @Field static final String sGTH='>'
