@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update July 29, 2023 for Hubitat
+ * Last update July 31, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -4603,7 +4603,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 					break
 				case sW:
 					//figure out the first day of the week matching the requirement
-					Long currentDay=dyDay //(new Date(time)).day
+					Long currentDay=dyDay
 					Long requiredDay; requiredDay=lcast(r9,oMs(tlo,sODW))
 					if(lge) myDetail r9,mySt1+"currentDay: $currentDay requiredDay: $requiredDay ",iN2
 					if(currentDay>requiredDay)requiredDay+=i7
@@ -4990,7 +4990,6 @@ private static Long pRes(Long r){
  * return the number of occurrences of same day of week up until the date or from the end of the month if backwards,i.e. last Sunday is -1, second-last Sunday is -2
  */
 @CompileStatic
-//private static Integer getWeekOfMonth(Date date,Boolean backwards=false){
 private static Integer getWeekOfMonth(ZonedDateTime zdt,Boolean backwards=false){
 	Integer day= zdt.getDayOfMonth()
 	if(backwards){
@@ -7662,14 +7661,14 @@ private Boolean callComp(Map r9,String fn,Map lv,Map rv,Map rv2,Map tv,Map tv2){
 }
 
 @CompileStatic
-private static String cnlS(Map sch){ return "${sch.s} (st:${sch.i}"+(sch.d?" / ${sch.d}":sBLK)+') ' }
+private static String cnlS(Map sch){ return "${sch[sS]} (st:${sch[sI]}"+(sch[sD] ? " / ${sch[sD]}":sBLK)+') ' }
 
 private void whatCnclsA(Map r9){
 	List<Map> schedules=sgetSchedules(sPROCS,isPep(r9))
 	String s; s=sBLK
 	for(Map sch in schedules){
 		Integer i=iMs(sch,sI)
-		if(i>iZ || i in LiistIN35) s+= cnlS(sch)
+		if(i>iZ || i in ListIN35) s+= cnlS(sch)
 	}
 	if(s)info "Cancel ALL task schedules..."+s,r9
 }
@@ -9620,7 +9619,7 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 				if(!(tres instanceof Map))res=err
 				else{
 					res=(Map)tres
-					if(res!=null /* && res.d */)res=rtnMap(sMt(res),gtSysVarVal(r9,tn))
+					if(res!=null)res=rtnMap(sMt(res),gtSysVarVal(r9,tn))
 				}
 			}
 		}else{
@@ -13192,7 +13191,7 @@ private Map<String,LinkedHashMap> getSystemVariablesAndValues(Map r9){
 		String k=(String)variable.key
 		// todo special handle $fuel $file
 		res=null
-		if(/*variable.value.d!=null &&*/ bIs(variable.value,sD)) res=gtSysVarVal(r9,k,true)
+		if(bIs(variable.value,sD)) res=gtSysVarVal(r9,k,true)
 		if(res==null && c[k]!=null)res=oMv(c[k])
 		variable.value[sV]=res
 	}
@@ -13515,7 +13514,6 @@ private static void stSysVarVal(Map r9,String nm,value/*,Boolean cachePersist=tr
 		else c.remove(nm)
 		r9[sPCACHE]=c
 	}
-	//if(var.d!=null)return
 	((Map)((Map)r9[sSYSVARS])[nm])[sV]=value
 }
 
