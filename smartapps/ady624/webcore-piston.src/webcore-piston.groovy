@@ -6083,35 +6083,36 @@ private Long vcmd_lifxToggle(Map r9,device,List prms){
 	return do_lifx(r9,'Post',path,body,duration,'toggle')
 }
 
-private Long vcmd_lifxBreathe(Map r9,device,List prms){
+private Long lifxBreathePulse(Map r9,device,List prms,String meth){
 	String selector=getLifxSelector(r9,sLi(prms,iZ))
 	if(!selector)return lifxErr(r9)
 	Map color=gtColor(sLi(prms,i1))
 	Map fromColor= prms[i2]==null ? null:gtColor(sLi(prms,i2))
 	Long period= prms[i3]==null ? null:Math.round( matchCastL(r9,prms[i3]) / d1000)
 	Integer cycles=iLi(prms,i4)
-	Integer peak=iLi(prms,i5)
-	Boolean powerOn= prms[i6]==null ? null:bcast(r9,prms[i6])
-	Boolean persist= prms[i7]==null ? null:bcast(r9,prms[i7])
-	String path="/v1/lights/${selector}/effects/breathe"
-	Map body= [color: color.hex]+(fromColor ? ([from_color: fromColor.hex]) : [:])+(period!=null ? ([period: period]) : [:])+(cycles ? ([cycles: cycles]) : [:])+(powerOn!=null ? ([power_on: powerOn]) : [:])+(persist!=null ? ([persist:persist]) : [:])+(peak!=null ? ([peak: peak / i100]) : [:])
+
+	Integer idx; idx=i5
+	Map peakres; peakres=[:]
+	if(meth=='breathe'){
+		Integer peak=iLi(prms,idx)
+		peakres= peak!=null ? [peak: peak / i100] : [:]
+		idx++
+	}
+	Boolean powerOn= prms[idx]==null ? null:bcast(r9,prms[idx])
+	idx++
+	Boolean persist= prms[idx]==null ? null:bcast(r9,prms[idx])
+	String path="/v1/lights/${selector}/effects/"+meth
+	Map body= [color: color.hex]+(fromColor ? ([from_color: fromColor.hex]) : [:])+(period!=null ? ([period: period]) : [:])+(cycles ? ([cycles: cycles]) : [:])+(powerOn!=null ? ([power_on: powerOn]) : [:])+(persist!=null ? ([persist:persist]) : [:])+peakres
 	Long ldur=Math.round( (period ? period:i1) * (cycles ? cycles:i1) )
-	return do_lifx(r9,'Post',path,body,ldur,'breathe')
+	return do_lifx(r9,'Post',path,body,ldur,meth)
+}
+
+private Long vcmd_lifxBreathe(Map r9,device,List prms){
+	return lifxBreathePulse(r9,device,prms,'breathe')
 }
 
 private Long vcmd_lifxPulse(Map r9,device,List prms){
-	String selector=getLifxSelector(r9,sLi(prms,iZ))
-	if(!selector)return lifxErr(r9)
-	Map color=gtColor(sLi(prms,i1))
-	Map fromColor= prms[i2]==null ? null:gtColor(sLi(prms,i2))
-	Long period= prms[i3]==null ? null:Math.round( matchCastL(r9,prms[i3]) / d1000)
-	Integer cycles=iLi(prms,i4)
-	Boolean powerOn= prms[i5]==null ? null:bcast(r9,prms[i5])
-	Boolean persist= prms[i6]==null ? null:bcast(r9,prms[i6])
-	String path="/v1/lights/${selector}/effects/pulse"
-	Map body= [color: color.hex]+(fromColor ? ([from_color: fromColor.hex]) : [:])+(period!=null ? ([period: period]) : [:])+(cycles ? ([cycles: cycles]) : [:])+(powerOn!=null ? ([power_on: powerOn]) : [:])+(persist!=null ? ([persist:persist]) : [:])
-	Long ldur=Math.round( (period ? period:i1) * (cycles ? cycles:i1) )
-	return do_lifx(r9,'Post',path,body,ldur,'pulse')
+	return lifxBreathePulse(r9,device,prms,'pulse')
 }
 
 @CompileStatic
@@ -10730,8 +10731,7 @@ private Map func_roundtimetominutes(Map r9,List<Map> prms){
 	nzdt= zdt.withNano(iZ)
 	nzdt= nzdt.withSecond(iZ) // this is rounding down
 
-	Integer currMinute = nzdt.getMinute()
-	Integer mod= currMinute % mins
+	Integer mod= nzdt.getMinute() % mins
 	Integer addm; addm=iZ
 	if(mod!=iZ){ addm= mins-mod	}
 	if(rndUp){
