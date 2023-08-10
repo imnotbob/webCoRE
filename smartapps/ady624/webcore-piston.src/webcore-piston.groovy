@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update July 31, 2023 for Hubitat
+ * Last update August 9, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230727_HE'
+@Field static final String sHVER='v0.3.114.20230809_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -442,6 +442,7 @@ static Boolean eric1(){ return false }
 @Field static final String sLCK2='lockOrQueue2'
 @Field static final String sGETTRTD='getTempRtd'
 @Field static final String sHNDLEVT='handleEvents'
+@Field static final String sINTDECSTR='(integer or decimal or string)'
 @Field static final String sVALUEN='(value1, value2,..., valueN)'
 @Field static final String sDATTRH='([device:attribute])'
 @Field static final String sDATTRHT='([device:attribute] [,.., [device:attribute]],threshold)'
@@ -1268,10 +1269,11 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 	clearMsetIds(piston)
 	msetIds(false,false,piston)
 
-	for(chunk in ((Map)settings).findAll{ ((String)it.key).startsWith(sCHNK) && !chunks[(String)it.key] }){
-		wappRemoveSetting((String)chunk.key)
-	}
-	for(chunk in chunks)wappUpdateSetting((String)chunk.key,[(sTYPE):sTEXT,(sVAL):chunk.value])
+	String k
+	for(chunk in ((Map<String,Object>)settings).findAll{ Map.Entry<String,Object> it ->
+		k= (String)it.key; k.startsWith(sCHNK) && !chunks[k] }){ //noinspection GroovyVariableNotAssigned
+		wappRemoveSetting(k) }
+	for(Map.Entry<String,String>chunk in chunks)wappUpdateSetting((String)chunk.key,[(sTYPE):sTEXT,(sVAL):chunk.value])
 	wappUpdateSetting(sBIN,[(sTYPE):sTEXT,(sVAL):sMs(gtState(),sBIN) ?: sBLK])
 	wappUpdateSetting(sATHR,[(sTYPE):sTEXT,(sVAL):sMs(gtState(),sATHR) ?: sBLK])
 
@@ -1325,52 +1327,58 @@ private static void fill_STMT(){
 
 @CompileStatic
 private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Map<String,Integer> existingIds=[:],List<Map> requiringIds=[],Integer level=iZ){
-	String nodeT=node?.t
+	String nodeT=sMt(node)
 	Integer maxId; maxId=mId
 	//Boolean lg= eric() && settings[sLOGNG]?.toInteger()>i2
 	if(nodeT in ListCmd){
 		Integer id
 		id=iMs(node,sDLR)?:iZ
-		if(id==iZ || existingIds[id.toString()]!=null) requiringIds.push(node)
+		String sid
+		sid=id.toString()
+		if(id==iZ || existingIds[sid]!=null) requiringIds.push(node)
 		else{
 			maxId=maxId<id ? id:maxId
-			existingIds[id.toString()]=id
+			existingIds[sid]=id
 		}
 		if(nodeT==sIF && node[sEI]){
-			liMs(node,sEI).removeAll{ Map it -> !it.c && !it.s }
+			liMs(node,sEI).removeAll{ Map it -> !it.c && !it.s } // modifies code
 			for(Map elseIf in liMs(node,sEI)){
 				id= iMs(elseIf,sDLR)?:iZ
-				if(id==iZ || existingIds[id.toString()]!=null) requiringIds.push(elseIf)
+				sid=id.toString()
+				if(id==iZ || existingIds[sid]!=null) requiringIds.push(elseIf)
 				else{
 					maxId=maxId<id ? id:maxId
-					existingIds[id.toString()]=id
+					existingIds[sid]=id
 				}
 			}
 		}
 		if(nodeT==sSWITCH && node[sCS]){
 			for(Map _case in liMs(node,sCS)){
 				id= iMs(_case,sDLR)?:iZ
-				if(id==iZ || existingIds[id.toString()]!=null) requiringIds.push(_case)
+				sid=id.toString()
+				if(id==iZ || existingIds[sid]!=null) requiringIds.push(_case)
 				else{
 					maxId=maxId<id ? id:maxId
-					existingIds[id.toString()]=id
+					existingIds[sid]=id
 				}
 			}
 		}
 		if(nodeT==sACTION && node[sK]){
 			for(Map task in liMs(node,sK)){
 				id=iMs(task,sDLR)?:iZ
-				if(id==iZ || existingIds[id.toString()]!=null) requiringIds.push(task)
+				sid=id.toString()
+				if(id==iZ || existingIds[sid]!=null) requiringIds.push(task)
 				else{
 					maxId=maxId<id ? id:maxId
-					existingIds[id.toString()]=id
+					existingIds[sid]=id
 				}
 			}
 		}
 	}
 	for(list in node.findAll{ it.value instanceof List }){
-		for(item in ((List)list.value).findAll{ it instanceof Map })
-			maxId=msetIds(shorten,inMem,(Map)item,maxId,existingIds,requiringIds,level+i1)
+		for(item in ((List)list.value).findAll{ it instanceof Map }){
+			maxId= msetIds(shorten,inMem,(Map)item,maxId,existingIds,requiringIds,level+i1)
+		}
 	}
 	if(level==iZ){
 		for(Map item in requiringIds){
@@ -2335,7 +2343,7 @@ void clearParentCache(String meth=sNL){
 
 // load caches
 private void loadCDB(){
-	theVirtDevicesFLD=null
+	VirtualDevicesF()
 	ComparisonsF()
 	VirtualCommandsF()
 	AttributesF()
@@ -4072,28 +4080,31 @@ private static Long calcDel(Long overBy){
 private Long checkForSlowdown(Map r9){
 	//return how long over the time limit
 	Long t2; t2=lMs(r9,sTPAUSE)
-	t2=t2!=null ? t2: lZ
-	Long overby=elapseT(lMs(r9,sTMSTMP))-t2-lMs(gtPLimits(),sSHLIMTIME)
+//	t2=t2!=null ? t2: lZ
+	Long t1= lMs(gtPLimits(),sSHLIMTIME)
+	Long t0= lMs(r9,sLSTPAUSE)
+	Long overby= t0==null || (wnow()-t0)>t1 ? elapseT(lMs(r9,sTMSTMP))-t2-t1 : lZ
 	return overby>lZ ? overby:lZ
 }
 
 @CompileStatic
 private void doPause(String mstr,Long delay,Map r9,Boolean ign=false){
 	Long actDelay,t1,t2
-	Long t0=wnow()
+	Long t0; t0=wnow()
 	if(lMs(r9,sLSTPAUSE)==null || ign || (t0-lMs(r9,sLSTPAUSE))>lMs(gtPLimits(),sSHLIMTIME)){
 		if(isInf(r9)){
 			if(isTrc(r9))trace mstr+'; lastPause: '+r9[sLSTPAUSE],r9
 			else info mstr,r9
 		}
 		r9[sLSTPAUSE]=t0
+		t0=wnow()
 		Long mdel= delay>25L ? delay-25L : delay
 		wpauseExecution(mdel)
 
 		t1=wnow()
 		actDelay=t1-t0
 		t2=lMs(r9,sTPAUSE)
-		t2=t2!=null ? t2:lZ
+//		t2=t2!=null ? t2:lZ
 		r9[sTPAUSE]=t2+actDelay
 		r9[sLSTPAUSE]=t1
 
@@ -4205,9 +4216,11 @@ private Boolean executeTask(Map r9,List devices,Map statement,Map task,Boolean a
 		myDetail r9,mySt,i1
 	}
 
+	// the command r: is replaced with command c.
 	//handle duplicate command "push" which was replaced with fake command "pushMomentary"
 	Map.Entry<String,Map> override=CommandsOverrides.find{ (String)it.value.r==tskC }
 	String command=override ? sMs(override.value,sC):tskC
+	if(override && lg)debug "Overriding command ${tskC} with ${command}",r9
 
 	//parse parameter
 	List prms=[]
@@ -4264,7 +4277,7 @@ private Boolean executeTask(Map r9,List devices,Map statement,Map task,Boolean a
 			if(vcmd!=null){
 				delay=executeVirtualCommand(r9,aggregate ? devices:device,command,prms)
 				if(aggregate)break
-			}
+			}else warn mySt+"$device command $command not found, prms: $prms",r9
 		}
 	}
 	//negative delays force us to reschedule
@@ -10839,14 +10852,14 @@ private Map func_bool(Map r9,List<Map> prms){ return func_boolean(r9,prms)}
 /** sqr converts a decimal to square decimal value			**/
 /** Usage: sqr(integer or decimal or string)				**/
 private Map func_sqr(Map r9,List<Map> prms){
-	if(badParams(prms,i1))return rtnErr('sqr(integer or decimal or string)')
+	if(badParams(prms,i1))return rtnErr('sqr'+sINTDECSTR)
 	rtnMapD(dblEvalExpr(r9,prms[iZ])**i2)
 }
 
 /** sqrt converts a decimal to square root decimal value		**/
 /** Usage: sqrt(integer or decimal or string)				**/
 private Map func_sqrt(Map r9,List<Map> prms){
-	if(badParams(prms,i1))return rtnErr('sqrt(integer or decimal or string)')
+	if(badParams(prms,i1))return rtnErr('sqrt'+sINTDECSTR)
 	rtnMapD(Math.sqrt(dblEvalExpr(r9,prms[iZ])))
 }
 
@@ -10864,11 +10877,61 @@ private Map func_ispistonpaused(Map r9,List<Map> prms){
 /** power converts a decimal to power decimal value			**/
 /** Usage: power(integer or decimal or string, power)			**/
 private Map func_power(Map r9,List<Map> prms){
-	if(badParams(prms,i2))return rtnErr('power(integer or decimal or string, power)')
-	rtnMapD(dblEvalExpr(r9,prms[iZ]) ** dblEvalExpr(r9,prms[i1]))
+	if(badParams(prms,i2))return rtnErr('power'+sINTDECSTR)
+	rtnMapD(Math.pow(dblEvalExpr(r9,prms[iZ]), dblEvalExpr(r9,prms[i1]) ))
+}
+private Map func_pow(Map r9,List<Map> prms){ return func_power(r9,prms)}
+
+/** sin converts a decimal to sine decimal value		**/
+/** Usage: sin(integer or decimal or string)			**/
+private Map func_sin(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('sin'+sINTDECSTR)
+	rtnMapD(Math.sin(dblEvalExpr(r9,prms[iZ]) ))
 }
 
-/** round converts a decimal to rounded value			**/
+/** cos converts a decimal to cosine decimal value			**/
+/** Usage: cos(integer or decimal or string)			**/
+private Map func_cos(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('cos'+sINTDECSTR)
+	rtnMapD(Math.cos(dblEvalExpr(r9,prms[iZ]) ))
+}
+
+/** tan converts a decimal to tangent decimal value			**/
+/** Usage: tan(integer or decimal or string)			**/
+private Map func_tan(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('tan'+sINTDECSTR)
+	rtnMapD(Math.tan(dblEvalExpr(r9,prms[iZ]) ))
+}
+
+/** atan2 converts a decimal to angle theta decimal value			**/
+/** Usage: atan2(integer or decimal or string)			**/
+private Map func_atan2(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('atan2'+sINTDECSTR)
+	rtnMapD(Math.atan2(dblEvalExpr(r9,prms[iZ]) ))
+}
+
+/** log converts a decimal to natural logarithm decimal value		**/
+/** Usage: log(integer or decimal or string)			**/
+private Map func_log(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('log'+sINTDECSTR)
+	rtnMapD(Math.log(dblEvalExpr(r9,prms[iZ]) ))
+}
+
+/**  converts a decimal degrees to radians decimal value		**/
+/** Usage: toradians(integer or decimal or string)			**/
+private Map func_toradians(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('toradians'+sINTDECSTR)
+	rtnMapD(Math.toRadians(dblEvalExpr(r9,prms[iZ]) ))
+}
+
+/** todegrees converts a decimal radians to degrees decimal value		**/
+/** Usage: todegrees(integer or decimal or string)			**/
+private Map func_todegrees(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('todegrees'+sINTDECSTR)
+	rtnMapD(Math.toDegrees(dblEvalExpr(r9,prms[iZ]) ))
+}
+
+/** round converts a decimal to rounded decimal value			**/
 /** Usage: round(decimal or string[, precision])		**/
 private Map func_round(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnErr('round(decimal or string[, precision])')
@@ -13782,10 +13845,8 @@ static void mb(String meth=sNL){
 
 /* wrappers */
 @Field static Map<String,Map> theAttributesFLD
-
 //uses i,p,t,m
 private static Map<String,Map> Attributes(){ return theAttributesFLD }
-
 private Map<String,Map> AttributesF(){
 	theAttributesFLD=(Map)parent.getChildAttributes()
 	mb()
@@ -13793,10 +13854,8 @@ private Map<String,Map> AttributesF(){
 }
 
 @Field static Map<String,Map> theComparisonsFLD
-
 //uses p,t
 private static Map<String,Map<String,Map>> Comparisons(){ return theComparisonsFLD }
-
 private Map<String,Map<String,Map>> ComparisonsF(){
 	theComparisonsFLD=(Map)parent.getChildComparisons()
 	mb()
@@ -13804,10 +13863,8 @@ private Map<String,Map<String,Map>> ComparisonsF(){
 }
 
 @Field static Map<String,Map> theVirtCommandsFLD
-
 //uses o (override phys command),a (aggregate commands)
 private static Map<String,Map> VirtualCommands(){ return theVirtCommandsFLD }
-
 private Map<String,Map> VirtualCommandsF(){
 	theVirtCommandsFLD=(Map)parent.getChildVirtCommands()
 	mb()
@@ -13817,29 +13874,23 @@ private Map<String,Map> VirtualCommandsF(){
 //uses c and r
 // the command r: is replaced with command c.
 // If the VirtualCommand c exists and has o: true we will use that virtual command; otherwise it will be replaced with a device command (if one exists)
-// the command r: is replaced with command c.
 @Field static final Map<String,Map> CommandsOverrides=[
 		push:[c:"push",	s:null,r:"pushMomentary"],
 		flash:[c:"flash",	s:null,r:"flashNative"] //flash native command conflicts with flash emulated command. Also needs "o" option on command described later
 ]
 
 @Field static Map<String,Map> theVirtDevicesFLD
-
 //uses ac,o
-private Map<String,Map> VirtualDevices(){
-	Map r=theVirtDevicesFLD
-	if(r==null){
-		theVirtDevicesFLD=(Map)parent.getChildVirtDevices()
-		mb()
-	}
+private Map<String,Map> VirtualDevices(){ return theVirtDevicesFLD ?: VirtualDevicesF() }
+private Map<String,Map> VirtualDevicesF(){
+	theVirtDevicesFLD=(Map)parent.getChildVirtDevices()
+	mb()
 	return theVirtDevicesFLD
 }
 
 @Field static Map<String,Map> thePhysCommandsFLD
-
 //uses a,v
 private static Map<String,Map> PhysicalCommands(){ return thePhysCommandsFLD }
-
 private Map<String,Map> PhysicalCommandsF(){
 	thePhysCommandsFLD=(Map)parent.getChildCommands()
 	mb()
@@ -13847,9 +13898,7 @@ private Map<String,Map> PhysicalCommandsF(){
 }
 
 @Field static List<Map> theColorsFLD
-
 private static List<Map> getColors(){ return theColorsFLD }
-
 private List<Map> getColorsF(){
 	theColorsFLD=(List)parent.getColors()
 	mb()

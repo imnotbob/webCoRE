@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update July 27, 2023 for Hubitat
+ * Last update August 9, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -31,8 +31,8 @@
 //file:noinspection GrMethodMayBeStatic
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230727_HE'
-@Field static final String sHVERSTR='v0.3.114.20230727_HE - July 27, 2023'
+@Field static final String sHVER='v0.3.114.20230809_HE'
+@Field static final String sHVERSTR='v0.3.114.20230809_HE - August 9, 2023'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -5417,6 +5417,14 @@ Map getChildComparisons(){
 	(sBOOLN)		: [ (sT): sBOOLN,					],
 	ispistonpaused	: [ (sT): sBOOLN,					],
 	power			: [ (sT): sDEC,						],
+	pow				: [ (sT): sDEC,						],
+	sin				: [ (sT): sDEC,						],
+	cos				: [ (sT): sDEC,						],
+	tan				: [ (sT): sDEC,						],
+	atan2			: [ (sT): sDEC,						],
+	log				: [ (sT): sDEC,						],
+	toradians		: [ (sT): sDEC,	(sD): "toRadians"			],
+	todegrees		: [ (sT): sDEC,	(sD): "toDegrees"			],
 	sqr				: [ (sT): sDEC,						],
 	sqrt			: [ (sT): sDEC,						],
 	setvariable		: [ (sT): sBOOLN,	(sD): "setVariable",			],
