@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update August 9, 2023 for Hubitat
+ * Last update August 17, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -1269,11 +1269,10 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 	clearMsetIds(piston)
 	msetIds(false,false,piston)
 
-	String k
-	for(chunk in ((Map<String,Object>)settings).findAll{ Map.Entry<String,Object> it ->
-		k= (String)it.key; k.startsWith(sCHNK) && !chunks[k] }){ //noinspection GroovyVariableNotAssigned
-		wappRemoveSetting(k) }
-	for(Map.Entry<String,String>chunk in chunks)wappUpdateSetting((String)chunk.key,[(sTYPE):sTEXT,(sVAL):chunk.value])
+	for(chunk in ((Map)settings).findAll{ ((String)it.key).startsWith(sCHNK) && !chunks[(String)it.key] }){
+		wappRemoveSetting((String)chunk.key)
+	}
+	for(chunk in chunks)wappUpdateSetting((String)chunk.key,[(sTYPE):sTEXT,(sVAL):chunk.value])
 	wappUpdateSetting(sBIN,[(sTYPE):sTEXT,(sVAL):sMs(gtState(),sBIN) ?: sBLK])
 	wappUpdateSetting(sATHR,[(sTYPE):sTEXT,(sVAL):sMs(gtState(),sATHR) ?: sBLK])
 
