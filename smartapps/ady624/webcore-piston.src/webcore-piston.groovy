@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update August 17, 2023 for Hubitat
+ * Last update August 28, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230809_HE'
+@Field static final String sHVER='v0.3.114.20230828_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -1053,7 +1053,7 @@ void uninstalled(){
 }
 
 void initialize(){
-	svSunTFLD=null; mb()
+	svSunTFLD=[:]; mb()
 	String tt1=(String)gtSetting(sLOGNG)
 	Integer tt2=iMs(gtState(),sLOGNG)
 	String tt3=tt2.toString()
@@ -10888,6 +10888,13 @@ private Map func_sin(Map r9,List<Map> prms){
 	rtnMapD(Math.sin(dblEvalExpr(r9,prms[iZ]) ))
 }
 
+/** asin converts a decimal to inverse sine decimal value in radians		**/
+/** Usage: asin(integer or decimal or string)			**/
+private Map func_asin(Map r9,List<Map> prms){
+	if(badParams(prms,i1))return rtnErr('asin'+sINTDECSTR)
+	rtnMapD(Math.asin(dblEvalExpr(r9,prms[iZ]) ))
+}
+
 /** cos converts a decimal to cosine decimal value			**/
 /** Usage: cos(integer or decimal or string)			**/
 private Map func_cos(Map r9,List<Map> prms){
@@ -13009,7 +13016,7 @@ private void tracePoint(Map r9,String oId,Long duration,value){
 	'December'
 ]
 
-@Field static Map svSunTFLD
+@Field static volatile Map<String,Map> svSunTFLD = [:]
 @Field static final String sNEXTM='nextM'
 @Field static final String sTRISE= 'todayssunrise'
 @Field static final String sTSET= 'todayssunset'
@@ -13018,17 +13025,19 @@ private void tracePoint(Map r9,String oId,Long duration,value){
 /* wrappers */
 private Map initSunrSunst(Map r9){
 	String ty=sSUNT
-	Map t0; t0=svSunTFLD
+	TimeZone mtz=rTZ(r9)
+	String k=TZID(mtz)
+
+	Map t0; t0=svSunTFLD[k]
 	Long t; t=wnow()
 	//mTZ()
 	if(t0!=null){
 		if(t<lMs(t0,sNEXTM)){
 			r9[ty]=[:]+t0
-		}else{ t0=null; svSunTFLD=null; mb() }
+		}else{ t0=null; svSunTFLD[k]=null; mb() }
 	}
 	if(t0==null){
 		Map sunTimes=app.getSunriseAndSunset()
-		TimeZone mtz=rTZ(r9)
 		if(sunTimes[sSUNRISE]==null){
 			warn 'Actual sunrise and sunset times are unavailable; please reset the location for your hub',r9
 			Long t1=getMidnightTime(mtz)
@@ -13041,13 +13050,23 @@ private Map initSunrSunst(Map r9){
 		Long nmnght=getNextMidnightTime(mtz)
 		Long c,d,a1,b1
 
-		Boolean good
-		good=true
+		Boolean good; good=true
 		try{
-			a1=((Date)todaysSunrise).getTime() // requires FW 2.2.3.132 or later
-			b1=((Date)todaysSunset).getTime()
-			c=((Date)tomorrowsSunrise).getTime()
-			d=((Date)tomorrowsSunset).getTime()
+			Boolean fnd; fnd=false
+			try{
+				a1=((Date)getTodaysSunrise(mtz)).getTime() // requires FW 2.3.6.118 or later
+				b1=((Date)getTodaysSunset(mtz)).getTime()
+				c=((Date)getTomorrowsSunrise(mtz)).getTime()
+				d=((Date)getTomorrowsSunset(mtz)).getTime()
+				fnd=true
+				if(eric())debug "updating global sunrise with TZ ${mtz}",null
+			}catch(ignored){}
+			if(!fnd){
+				a1=((Date)getTodaysSunrise).getTime() // requires FW 2.2.3.132 or later
+				b1=((Date)getTodaysSunset).getTime()
+				c=((Date)getTomorrowsSunrise).getTime()
+				d=((Date)getTomorrowsSunset).getTime()
+			}
 			if(!a1){
 				a1= getMidnightTime(mtz)
 			}
@@ -13085,8 +13104,8 @@ private Map initSunrSunst(Map r9){
 		Long c1=Math.round(c-dMSDAY)-dstoffset
 		Long db1=Math.round(d-dMSDAY)-dstoffset
 		t0=[
-			(sSUNRISE): a,
-			(sSUNSET):b,
+			(sSUNRISE): a1,
+			(sSUNSET):b1,
 			(sTRISE): a1,
 			('calcsunrise'): (a>c1 ? a:c1),
 			(sTSET):b1,
@@ -13100,8 +13119,7 @@ private Map initSunrSunst(Map r9){
 		if(!good) warn 'Please update HE firmware to improve time handling',r9
 		r9[ty]=t0
 		if(t!=lZ){
-			svSunTFLD=t0
-			mb()
+			svSunTFLD[k]=t0; mb()
 			if(eric())debug "updating global sunrise ${t0}",null
 		}
 	}
@@ -14039,9 +14057,11 @@ private Map<String,Object> gtCurrentMode(){
 }
 private String gtLtScale(){ return (String)location.getTemperatureScale() }
 private String gtLname(){ return (String)location.getName() }
+
 private String gtLzip(){ return (String)location.zipCode }
 private String gtLlat(){ return ((BigDecimal)location.latitude).toString() }
 private String gtLlong(){ return ((BigDecimal)location.longitude).toString() }
+
 private String gtLhsmStatus(){ return (String)location.hsmStatus }
 
 private String gtLbl(d){ return "${d?.label ?: d?.name ?: gtLname()}".toString() }

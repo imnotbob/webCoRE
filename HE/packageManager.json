@@ -4,7 +4,7 @@
   "version": "1.0.83",
   "minimumHEVersion": "2.3.2",
   "licenseFile": "https://raw.githubusercontent.com/imnotbob/webCoRE/hubitat-patches/LICENSE",
-  "releaseNotes": "update for edit/save issue, adds math functions sin, cos, etc, and ability to set piston's operating timezoone, bug fixes, cleanups",
+  "releaseNotes": "update to add asin function, update piston settting timezone for sunrise/sunset, cleanup of setColorTemperature IDE display",
   "documentationLink": "https://wiki.webcore.co",
   "communityLink": "https://community.hubitat.com/t/webcore-for-hubitat-updates/11967",
   "dateReleased": "2023-08-17",
