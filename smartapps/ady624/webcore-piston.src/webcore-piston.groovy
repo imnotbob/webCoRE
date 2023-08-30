@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update August 28, 2023 for Hubitat
+ * Last update August 30, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -8111,12 +8111,12 @@ private void traverseStatements(node,Closure closure,parentNode=null,Map<String,
 	Integer lastlvl= iMs(lvl,sV)
 	if(ty==sDO) lvl[sV]=lastlvl-i1 // do does not increase the level
 	//if the statement has substatements go through them
-	if(node.s instanceof List) traverseStatements(liMs(node,sS),closure,node,data,lvl)
+	if(node[sS] instanceof List) traverseStatements(liMs(node,sS),closure,node,data,lvl)
 	if(ty==sDO) lvl[sV]=lastlvl
 
 	if(data!=null) data[sTIMER]=lastTimer
 
-	if(node.e instanceof List) traverseStatements(liMs(node,sE),closure,node,data,lvl)
+	if(node[sE] instanceof List) traverseStatements(liMs(node,sE),closure,node,data,lvl)
 }
 
 @CompileStatic
@@ -8375,6 +8375,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 		Closure conditionTraverser
 		Closure restrictionTraverser
 		Closure statementTraverser
+
 		expressionTraverser={ Map expression,parentExpression,String cmpTyp,Boolean isTrk ->
 			String subsId,deviceId,attr,exprID
 			subsId=sNL
@@ -8417,6 +8418,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 				incrementDevices(deviceId,cmpTyp,attr)
 			}
 		}
+
 		operandTraverser={ Map node,Map operand,Map value,String cmpTyp, Boolean isTrk ->
 			if(!operand)return
 			switch(sMt(operand)){
@@ -8571,12 +8573,14 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 					break
 			}
 		}
+
 		eventTraverser={ Map event,parentEvent ->
 			if(event[sLO]){
 				String cmpTyp=sTRIG
 				operandTraverser(event,mMs(event,sLO),null,cmpTyp,false)
 			}
 		}
+
 		List<String> ltsub=['happens_daily_at']
 		conditionTraverser={ Map cndtn,parentCondition ->
 			Map svCond=curCondition
@@ -8658,6 +8662,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 			//noinspection GrReassignedInClosureLocalVar
 			curCondition=svCond
 		}
+
 		restrictionTraverser={ Map restriction,Map parentRestriction,Map data ->
 			String rco=sMs(restriction,sCO)
 			if(rco){
@@ -8675,6 +8680,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 				}
 			}
 		}
+
 		List<String> lsub=[sIF,sFOR,sWHILE,sREPEAT,sSWITCH,sON,sEACH,sEVERY]
 		statementTraverser={ Map node,parentNode,Map<String,Boolean>data,Map<String,Integer>lvl ->
 			dwnGrdTrig= data!=null && bIs(data,sTIMER)
@@ -8761,6 +8767,8 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 					else if(!inMem) addWarning(node,'On event statement without events')
 					break
 				case sSWITCH:
+					if(node.containsKey(sS)) node.remove(sS) // modifies the code
+					if(node.containsKey(sCT)){ node.remove(sCT) } // modifies the code
 					operandTraverser(node,mMs(node,sLO),null,sCONDITION,false)
 					for(Map c in liMs(node,sCS)){
 						operandTraverser(c,mMs(c,sRO),null,sNL,false)
@@ -8860,7 +8868,10 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 							String ct,t1
 							ct=sMs(cndtn,sCT)
 							t1=sMs(cndtn,sSM)
-							if(sMt(cndtn)==sEVENT && ct==sNL){ cndtn[sCT]=sT; ct=sT } // modifies the code
+							if(ct==sNL){
+								if(sMt(cndtn)==sSWITCH){ cndtn[sCT]=sC; ct=sC } // modifies the code
+								if(sMt(cndtn)==sEVENT){ cndtn[sCT]=sT; ct=sT } // modifies the code
+							}
 							cndtn[sS]= t1!=never && (ct==sT || t1==always || !hasTriggers) // modifies the code
 							if(bIs(cndtn,sS) && a==sPSTNRSM && !bIs(gtState(),sALLOWR)){
 								assignSt(sALLOWR,true)
