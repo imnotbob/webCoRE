@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update August 1, 2023 for Hubitat
+ *  Last update August 31, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -8976,7 +8976,7 @@ Map getOptions_weather2(){
 	return options
 }
 
-def getMapData(map, String loc){
+def getMapData(Map map, String loc){
 	List<String> splt=loc.tokenize('.')
 	def cur
 	cur=map

@@ -3938,7 +3938,7 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 					Boolean implctBr=sMs(statement,sCTP)!=sE // case traversal policy, i- autobreak (def), e- fall thru
 					fallThru=!implctBr
 					perform=false
-					if(lg)debug "Evaluating switch with values $lo.values",r9
+					if(lg)debug "Evaluating switch statement with values $lo.values",r9
 					//go through all cases
 					for(Map _case in liMs(statement,sCS)){
 						Map ro=[(sOPERAND): mMs(_case,sRO),(sVALUES): levaluateOperand(r9,_case,mMs(_case,sRO))]
