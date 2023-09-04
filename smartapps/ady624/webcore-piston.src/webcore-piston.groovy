@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update August 30, 2023 for Hubitat
+ * Last update September 4, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -13073,10 +13073,10 @@ private Map initSunrSunst(Map r9){
 				if(eric())debug "updating global sunrise with TZ ${mtz}",null
 			}catch(ignored){}
 			if(!fnd){
-				a1=((Date)getTodaysSunrise).getTime() // requires FW 2.2.3.132 or later
-				b1=((Date)getTodaysSunset).getTime()
-				c=((Date)getTomorrowsSunrise).getTime()
-				d=((Date)getTomorrowsSunset).getTime()
+				a1=((Date)getTodaysSunrise()).getTime() // requires FW 2.2.3.132 or later
+				b1=((Date)getTodaysSunset()).getTime()
+				c=((Date)getTomorrowsSunrise()).getTime()
+				d=((Date)getTomorrowsSunset()).getTime()
 			}
 			if(!a1){
 				a1= getMidnightTime(mtz)
