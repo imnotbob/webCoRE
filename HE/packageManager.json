@@ -1,13 +1,13 @@
 {
   "packageName": "webCoRE",
   "author": "imnot_bob",
-  "version": "1.0.84",
+  "version": "1.0.85",
   "minimumHEVersion": "2.3.2",
   "licenseFile": "https://raw.githubusercontent.com/imnotbob/webCoRE/hubitat-patches/LICENSE",
-  "releaseNotes": "UI modules updates, update switch statement subscription display, update to add asin function, update piston settting timezone for sunrise/sunset, cleanup of setColorTemperature IDE display",
+  "releaseNotes": "Small bugfix for sunrise/sunset, UI modules updates, update switch statement subscription display, update to add asin function, update piston settting timezone for sunrise/sunset, cleanup of setColorTemperature IDE display",
   "documentationLink": "https://wiki.webcore.co",
   "communityLink": "https://community.hubitat.com/t/webcore-for-hubitat-updates/11967",
-  "dateReleased": "2023-08-31",
+  "dateReleased": "2023-09-04",
   "apps": [
     {
       "id": "cb649f7b-d33d-42b8-82c3-79d1d2101fea",
