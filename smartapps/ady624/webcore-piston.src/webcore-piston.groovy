@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update September 4, 2023 for Hubitat
+ * Last update September 7, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -10759,7 +10759,7 @@ private Map func_roundtimetominutes(Map r9,List<Map> prms){
 	if(mod!=iZ){ addm= mins-mod	}
 	if(rndUp){
 		nzdt= nzdt.plusMinutes(addm.toLong())
-	} else nzdt= nzdt.minusMinutes(addm.toLong())
+	} else nzdt= nzdt.minusMinutes(mod.toLong())
 
 	rtnMap(sDTIME, nzdt.toInstant().toEpochMilli())
 }
