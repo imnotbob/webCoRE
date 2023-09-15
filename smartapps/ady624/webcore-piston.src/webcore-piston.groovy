@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update September 7, 2023 for Hubitat
+ * Last update September 15, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -50,6 +50,7 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.time.*
+//import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.concurrent.Semaphore
 
@@ -331,11 +332,13 @@ static Boolean eric1(){ return false }
 @Field static final String sALLLOC='allLocations'
 @Field static final String sOLDLOC='oldLocations'
 @Field static final String sNACCTSID='newAcctSid'
+@Field static final String sHCOREVER='hcoreVersion'
 
 @Field static final String sOLD='old'
 @Field static final String sNEW='new'
 @Field static final String sAUTONEW='autoNew'
 @Field static final String sPIS='pis'
+@Field static final String sCACHED='cached'
 
 @Field static final String sDV='dev'
 
@@ -441,6 +444,8 @@ static Boolean eric1(){ return false }
 @Field static final String sLCK1='lockOrQueue1'
 @Field static final String sLCK2='lockOrQueue2'
 @Field static final String sGETTRTD='getTempRtd'
+@Field static final String sGETPCACHE='getParentCache'
+@Field static final String sGETRTD='getRTD'
 @Field static final String sHNDLEVT='handleEvents'
 @Field static final String sINTDECSTR='(integer or decimal or string)'
 @Field static final String sVALUEN='(value1, value2,..., valueN)'
@@ -553,47 +558,47 @@ private static Boolean isEnbl(Map m){ bIs(m,sENABLED) }
 @CompileStatic
 private static Boolean isBrk(Map m){ bIs(m,sBREAK) }
 
-/** m.string  */
+/** m.string */
 @CompileStatic
 private static Map<String,Object> mMs(Map m,String s){ (Map)m.get(s) }
 
-/** m.string  */
+/** m.string */
 @CompileStatic
 private static Map<String,Map> msMs(Map m,String s){ (Map<String,Map>)m.get(s) }
 
-/** m.string  */
+/** m.string */
 @CompileStatic
 private static String sMs(Map m,String v){ (String)m.get(v) }
 
-/** l[integer]  */
+/** l[integer] */
 @CompileStatic
 private static String sLi(List l,Integer v){ (String)l[v] }
 
-/** m.a  */
+/** m.a */
 @CompileStatic
 private static String sMa(Map m){ sMs(m,sA) }
 
-/** m.t  */
+/** m.t */
 @CompileStatic
 private static String sMt(Map m){ sMs(m,sT) }
 
-/** m.vt  */
+/** m.vt */
 @CompileStatic
 private static String sMvt(Map m){ sMs(m,sVT) }
 
-/** m.t  */
+/** m.t */
 @CompileStatic
 private static Long lMt(Map m){ (Long)m.get(sT) }
 
-/** m.string  */
+/** m.string */
 @CompileStatic
 private static Long lMs(Map m,String v){ (Long)m.get(v) }
 
-/** m.s  */
+/** m.s */
 @CompileStatic
 private static Integer iMsS(Map m){ iMs(m,sS) }
 
-/** m.string  */
+/** m.string */
 @CompileStatic
 private static Integer iMs(Map m,String v){ (Integer)m.get(v) }
 
@@ -617,7 +622,7 @@ private static List<Map> liMs(Map m,String s){ (List)m.get(s) }
 @CompileStatic
 private static Integer iLi(List l,Integer i){ (Integer)l[i] }
 
-/** m[v]  */
+/** m[v] */
 @CompileStatic
 private static oMs(Map m,String v){ m.get(v) }
 
@@ -656,10 +661,10 @@ private static Boolean isEric(Map r9){ eric1() && isDbg(r9) }
 @CompileStatic
 private static Boolean badParams(List prms,Integer minParams){ return (prms==null || prms.size()<minParams) }
 
-/** Returns t:t,v:v  */
+/** Returns t:t,v:v */
 @CompileStatic
 private static Map<String,Object> rtnMap(String t,v){ return [(sT):t,(sV):v] }
-/** Returns t:duration,v:m.v,vt:m.vt  */
+/** Returns t:duration,v:m.v,vt:m.vt */
 @CompileStatic
 private static Map<String,Object> rtnMap1(Map m){ return [(sT):sDURATION,(sV):oMv(m),(sVT):sMvt(m)] }
 /** Returns t:string,v:v */
@@ -1211,7 +1216,7 @@ private LinkedHashMap recreatePiston(Boolean shorten=false,Boolean inMem=false,B
 			thePistonCacheFLD[pNm]=pData
 			mb()
 		}
-		if(pData[sPIS]!=null)return (LinkedHashMap)(pData[sPIS]+[('cached'):true])
+		if(pData[sPIS]!=null)return (LinkedHashMap)(pData[sPIS]+[(sCACHED):true])
 	}
 
 	if(eric())debug "recreating piston shorten: $shorten inMem: $inMem useCache: $useCache",null
@@ -1426,12 +1431,12 @@ private static void fill_ListAL(){
 		// sP phys/avg (uses a, d, g, p, i, f?)
 		// sD devices  (uses d)
 		// sV virt (uses v)
-		// sS preset (uses s) (operand)   OR it is for switch case 's', 'r' ('r' for range)
+		// sS preset (uses s) (operand)  OR it is for switch case 's', 'r' ('r' for range)
 		// sX variable (uses x, xi)
 		// sC constant (uses c)
 		// sE expr (uses exp)
 		// sU argument (uses u)
-		ListAL=[sP,sD,sV,sS,sX,sC,sE,sU]	//  don't need
+		ListAL=[sP,sD,sV,sS,sX,sC,sE,sU]	// don't need
 		ListC1=[      sV,sS,   sC,sE,sU]	//		g,a
 		ListC2=[      sV,sS,sX,sC,sE,sU]	//		d
 
@@ -1514,7 +1519,7 @@ private void cleanCode(Map i,Boolean inMem){
 		// cruft when editing operands
 		if(ty in ListC2 && item[sD] instanceof List) item.remove(sD)
 		if(!(ty in ListEC) && item[sEXP]) item.remove(sEXP) // evaluateOperand
-		if(ty!=sX && item[sX]!=null){  item.remove(sX); item.remove(sXI)}
+		if(ty!=sX && item[sX]!=null){ item.remove(sX); item.remove(sXI)}
 		if(ty!=sE && item[sE]!=null) item.remove(sE)
 		if(ty!=sC && item[sC]!=null) item.remove(sC)
 		if(ty!=sV && oMv(item)!=null) item.remove(sV)
@@ -1542,7 +1547,7 @@ private void cleanCode(Map i,Boolean inMem){
 		if(sMs(item,sF)==sL) item.remove(sF) // timeValue.f
 		if(sMs(item,sSM)==sAUTO) item.remove(sSM) // subscription method
 		if(sMs(item,sCTP)==sI) item.remove(sCTP) // case traversal policy switch stmt
-		if(item[sN] && ty && sMa(item)==sD) item.remove(sA) // variable.a sS -> const  sD-> dynamic
+		if(item[sN] && ty && sMa(item)==sD) item.remove(sA) // variable.a sS -> const, sD-> dynamic
 
 		/*
 			statement.t = null; //type
@@ -1603,7 +1608,7 @@ private void cleanCode(Map i,Boolean inMem){
 		// item.w is warnings
 		if(item[sW] instanceof List) item.remove(sW)
 
-		if(item[sROP] && (!item[sR] || liMs(item,sR).size()==iZ)){  item.remove(sROP); item.remove(sRN) }
+		if(item[sROP] && (!item[sR] || liMs(item,sR).size()==iZ)){ item.remove(sROP); item.remove(sRN) }
 	}
 
 	for(String t in ListC3){
@@ -2327,7 +2332,7 @@ void clearParentCache(String meth=sNL){
 	String lockTyp='clearParentCache'
 	String semName=sTSLF
 	String wName=sPAppId()
-	getTheLock(semName,lockTyp)
+	getTheLock(semName,lockTyp,true)
 
 	theParentCacheVFLD[wName]=null
 	theParentCacheVFLD=theParentCacheVFLD
@@ -2367,9 +2372,8 @@ private LinkedHashMap getParentCache(){
 	LinkedHashMap res
 	res=theParentCacheVFLD[wName]
 	if(res==null){
-		String lockTyp='getParentCache'
 		String semName=sTSLF
-		getTheLock(semName,lockTyp)
+		getTheLock(semName,sGETPCACHE,true)
 		res=theParentCacheVFLD[wName]
 		Boolean sendM; sendM=false
 		if(res==null){
@@ -2377,7 +2381,7 @@ private LinkedHashMap getParentCache(){
 			Map t1
 			t1=[
 				coreVersion: sMs(t0,'sCv'),
-				hcoreVersion: sMs(t0,'sHv'),
+				(sHCOREVER): sMs(t0,'sHv'),
 				(sPWRSRC): sMs(t0,sPWRSRC),
 				('region'): sMs(t0,'region'),
 				(sINSTID): sMs(t0,sINSTID),
@@ -2461,7 +2465,7 @@ private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=
 	r9[sSYSVARS]=getSystemVariables()
 
 	Map aS
-	aS=getCachedMaps('getRTD')
+	aS=getCachedMaps(sGETRTD)
 	aS=aS!=null?aS:[:]
 	Map st=mMs(aS,sST)
 	Map st1=st!=null && st instanceof Map ? [:]+st : [(sOLD):sBLK,(sNEW):sBLK] as LinkedHashMap
@@ -2471,7 +2475,7 @@ private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=
 	r9[sPSTART]=wnow()
 
 	if(piston==null)piston=recreatePiston(shorten,inMem)
-	Boolean doSubScribe=!bIs(piston,'cached')
+	Boolean doSubScribe=!bIs(piston,sCACHED)
 
 	r9[sPISTN]=piston
 
@@ -2522,7 +2526,7 @@ private void dumpPCsize(){
 
 private void checkVersion(Map r9){
 	String ver=sHVER
-	String t0=sMs(r9,'hcoreVersion')
+	String t0=sMs(r9,sHCOREVER)
 	if(ver!=t0){
 		String tt0="child app's version($ver)".toString()
 		String tt1="parent app's version($t0)".toString()
@@ -3029,7 +3033,7 @@ private static void fill_cleanData(){
 		cleanData= [sALLDEVS, sDID3OR5, sPCACHE, sMEM, sBREAK, sPWRSRC, sOLDLOC, sINCIDENTS, sSEMADEL, sVARS,
 					sSTACCESS, sATHR, sBLD, sNWCACHE, 'mediaData', 'mediaType', 'mediaId', 'mediaUrl', 'weather',
 					sLOGS, sTRC, sSYSVARS, sLOCALV, sPREVEVT, sJSON, sRESP,
-					sCACHE, sSTORE, sSETTINGS, sLOCMODEID, 'coreVersion', 'hcoreVersion', sCNCLATNS, sCNDTNSTC, sPSTNSTC, sFFT, sRUN,
+					sCACHE, sSTORE, sSETTINGS, sLOCMODEID, 'coreVersion', sHCOREVER, sCNCLATNS, sCNDTNSTC, sPSTNSTC, sFFT, sRUN,
 					sRESUMED, sTERM, sINSTID, sWUP, sSTMTL, sARGS, 'nfl', sTEMP]
 	if(cleanData1.size()==iZ)
 		cleanData1= [sLSTART,sLSEND,sGENIN,sPSTART,sPEND]
@@ -3407,7 +3411,7 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 	}
 }
 
-/** Returns newly created schedules  */
+/** Returns newly created schedules */
 @CompileStatic
 private static List<Map> sgtSch(Map r9){ return liMs(r9,sSCHS) }
 
@@ -3415,7 +3419,7 @@ private static List<Map> sgtSch(Map r9){ return liMs(r9,sSCHS) }
 @CompileStatic
 private static Boolean spshSch(Map r9,Map sch){ return liMs(r9,sSCHS).push(sch) }
 
-/** Returns saved schedules  */
+/** Returns saved schedules */
 @CompileStatic
 private List<Map> sgetSchedules(String t,Boolean myPep){
 	List<Map> schedules
@@ -3425,7 +3429,7 @@ private List<Map> sgetSchedules(String t,Boolean myPep){
 	return schedules
 }
 
-/** updates saved schedules  */
+/** updates saved schedules */
 @CompileStatic
 private void updateSchCache(Map r9,List<Map> schedules,String t,String lt,Boolean myPep){
 	if(myPep)assignAS(sSCHS,schedules) else assignSt(sSCHS,(List<Map>)[]+schedules)
@@ -3604,10 +3608,10 @@ private Boolean executeStatements(Map r9,List<Map>statements,Boolean async=false
 
 @Field static final String sRUN='running'
 @Field static final String sFFT='ffTo'
-/**  ffto == 0 */
+/** ffto == 0 */
 @CompileStatic
 private static Boolean prun(Map r9){ bIs(r9,sRUN) }
-/**  ffto != 0 */
+/** ffto != 0 */
 @CompileStatic
 private static Boolean ffwd(Map r9){ !prun(r9) }
 /** get ffto */
@@ -5080,7 +5084,7 @@ private void requestWakeUp(Map r9,Map statement,Map task,Long timeOrDelay,String
 @CompileStatic
 private String wakeS(Map r9,String m,Map sch){ Long t=lMt(sch); return m+" wake up at ${formatLocalTime(r9,t)} (in ${t-wnow()}ms) for "+cnlS(sch) }
 
-/** Returns true if switch does not match mat  */
+/** Returns true if switch does not match mat */
 @CompileStatic
 private Boolean ntMatSw(Map r9,String mat,device,String cmd){
 	if(mat!=sNL && gtSwitch(r9,device)!=mat){
@@ -5634,7 +5638,7 @@ private Long vcmd_flash(Map r9,device,List prms){
 	return wt+750L
 }
 
-/**  return duration estimate */
+/** return duration estimate */
 @CompileStatic
 private Long stRepeat(Map r9,Map jq){
 	Integer start=iMsS(jq)
@@ -6466,7 +6470,7 @@ private Boolean readFile(Map r9,List prms,Boolean data){
 						i=resp.data.read()
 					}
 					res=true
-					//doLog(sWARN,"pNm: ${pNm} data: ${data}  file: ${readDataFLD[pNm]}")
+					//doLog(sWARN,"pNm: ${pNm} data: ${data} file: ${readDataFLD[pNm]}")
 				}else{
 					error "Read Response status $resp.status",r9
 				}
@@ -6948,7 +6952,7 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 			Integer steps= cndtnsCOL.size()
 			String sidx='c:fbi:'+myC.toString()
 			Integer ladderIndex
-			ladderIndex= matchCastI(r9,mMs(r9,sCACHE)[sidx])  // gives back iZ if null
+			ladderIndex= matchCastI(r9,mMs(r9,sCACHE)[sidx]) // gives back iZ if null
 			String sldt='c:fbt:'+myC.toString()
 			Long ladderUpdated
 			ladderUpdated=(Long)cast(r9,mMs(r9,sCACHE)[sldt],sDTIME) // gives back current dtime if null
@@ -7396,7 +7400,7 @@ private Boolean evaluateCondition(Map r9,Map cndtn,String collection,Boolean asy
 					if(isd){
 						Boolean eXcluded=bIs(tm,sX)
 			//x=eXclude- if a trigger comparison or a momentary device/attribute is looked for,
-			//   and the device/attr does not match the current event device/attr,
+			//  and the device/attr does not match the current event device/attr,
 			// then we must ignore the result during comparisons
 						ok= bIs(cndtn,sS) && (!isStays || (isStays && co==sSTAYUNCH)) &&
 							(ffwd(r9) || !eXcluded || needUpdateFLD[myId]!=false)
@@ -7558,7 +7562,7 @@ private Boolean evaluateComparison(Map r9,String comparison,Map lo,Map ro=null,M
 	for(Map<String,Map> value in liMs(lo,sVALUES)){
 		res=false
 		//x=eXclude- if a trigger comparison or a momentary device/attribute is looked for,
-		//   and the device/attr does not match the current event device/attr,
+		//  and the device/attr does not match the current event device/attr,
 		// then we must ignore the result during comparisons, unless forceAll
 		Map vvalMap; vvalMap= value ? (mMv(value) ?: null) : null
 		Boolean eXcluded= (vvalMap && bIs(vvalMap,sX))
@@ -7686,7 +7690,7 @@ private void whatCnclsA(Map r9){
 	if(s)info "Cancel ALL task schedules..."+s,r9
 }
 
-/** log what timers will be canceled due to piston state change from saved schedules  */
+/** log what timers will be canceled due to piston state change from saved schedules */
 private void whatCnclsP(Map r9){
 	List<Map> schedules=sgetSchedules(sPROCS,isPep(r9))
 	String s; s=sBLK
@@ -7695,7 +7699,7 @@ private void whatCnclsP(Map r9){
 	if(s)info "Cancel piston state changed schedules..."+s,r9
 }
 
-/** log what statements timers will be canceled from saved schedules  */
+/** log what statements timers will be canceled from saved schedules */
 private void whatStatementsCncl(Map r9,Integer stmtId, String data=sNL){
 	List<Map> schedules=sgetSchedules(sPROCS,isPep(r9))
 	String s; s=sBLK
@@ -7717,7 +7721,7 @@ private void cancelStatementSchedules(Map r9,Integer stmtId,String data=sNL){
 	if(!fnd) liMs(mMs(r9,sCNCLATNS),sSTMTS).push([(sID): stmtId,(sDATA): data])
 }
 
-/** log what condition timers will be canceled from saved schedules  */
+/** log what condition timers will be canceled from saved schedules */
 private void whatConditionsCncl(Map r9,Integer cndtnId){
 	List<Map> schedules=sgetSchedules(sPROCS,isPep(r9))
 	String s; s=sBLK
@@ -7763,7 +7767,7 @@ private List<Map> listPreviousStates(Map r9,device,String attr,Long threshold,Bo
 	List<Map> res=[]
 	List events=((List)device.events([all: true,max: i100])).findAll{ it -> (String)it.getName()==attr}
 	//if we need to exclude last event we start at the second event as the first one is the event that triggered execution.
-	//  The attribute's value has to be different from the current one to qualify for quiet
+	// The attribute's value has to be different from the current one to qualify for quiet
 	Integer sz=events.size()
 	if(lge)myDetail r9,mySt+"found $sz events",iN2
 	String s='startTime'
@@ -8708,7 +8712,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 					String m= ' are designed to be top-level statements and should not be used inside other statements.'
 					switch(t){
 						case sEVERY: addWarning(node,'Every timers'+m+' If you need a conditional timer, please look into using a while loop instead.'); break
-						case sON:  addWarning(node,'On event statements'+m); break
+						case sON: addWarning(node,'On event statements'+m); break
 					}
 				}
 				//doLog(sWARN,"found statement $t level ${lvl.v}")
@@ -13494,7 +13498,7 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case '$tzOffset': return rTZ(r9).getOffset(wnow())
 		case '$tzInDst': return rTZ(r9).inDaylightTime(new Date(wnow()))
 
-		//case '$zoneName': return mZ(r9).getDisplayName(TextStyle.FULL_STANDALONE,Locale.US)
+//		case '$zoneName': return mZ(r9).getDisplayName(TextStyle.FULL_STANDALONE, new Locale.Builder().setLanguage("en").setScript("Latn").setRegion("US").build())
 		case '$zoneId': return ZID(mZ(r9))
 		case '$zoneOffset': return mZ(r9).getRules().getOffset(Instant.ofEpochMilli(wnow())).getTotalSeconds()*1000L
 		case '$zoneInDst': return mZ(r9).getRules().isDaylightSavings(Instant.ofEpochMilli(wnow()))

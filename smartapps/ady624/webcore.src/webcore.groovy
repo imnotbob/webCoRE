@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update September 7, 2023 for Hubitat
+ * Last update September 15, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20230828_HE'
-@Field static final String sHVERSTR='v0.3.114.20230828_HE - September 7, 2023'
+@Field static final String sHVERSTR='v0.3.114.20230828_HE - September 15, 2023'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -186,7 +186,7 @@ private static Boolean graphsOn(){ return true }
 @CompileStatic
 private static String sMs(Map m,String v){ (String)m.get(v) }
 
-/** m.string  */
+/** m.string */
 @CompileStatic
 private static Map mMs(Map m,String s){ (Map)m.get(s) }
 
@@ -1873,7 +1873,7 @@ private api_intf_dashboard_piston_create(){
 		if(!found){
 			try{
 				def piston=addChildApp("ady624", handlePistn(), pname)
-				debug "created piston $piston.id  params $p"
+				debug "created piston $piston.id params $p"
 				if(sMs(p,'author')!=sNL || sMs(p,'bin')!=sNL){
 					piston.config([bin: sMs(p,'bin'), author: sMs(p,'author'), initialVersion: sVER])
 				}
@@ -2342,7 +2342,7 @@ private api_intf_dashboard_presence_create(){
 	Map p=(Map)params
 	if(verifySecurityToken(p)){
 		String dni=sMs(p,'dni')
-		def sensor=(dni ? getChildDevices().find{ (String)it.getDeviceNetworkId()==dni } : null) ?: addChildDevice("ady624", handlePres(), dni ?: hashId("${wnow()}"), null, [label: sMs(p,'name')])
+		def sensor=(dni ? wgetChildDevices().find{ (String)it.getDeviceNetworkId()==dni } : null) ?: addChildDevice("ady624", handlePres(), dni ?: hashId("${wnow()}"), null, [label: sMs(p,'name')])
 		if(sensor){
 			sensor.label=sMs(p,'name')
 			result=[
@@ -2359,7 +2359,7 @@ private api_intf_location_entered(){
 	Map p=(Map)params
 	String deviceId=sMs(p,'device')
 	String dni=sMs(p,'dni')
-	def device=getChildDevices().find{ ((String)it.getDeviceNetworkId()==dni) || (hashId(it.id)==deviceId) }
+	def device=wgetChildDevices().find{ ((String)it.getDeviceNetworkId()==dni) || (hashId(it.id)==deviceId) }
 	if(device && p.place) device.processEvent([(sNM): 'entered', place: p.place, places: state.settings.places])
 }
 
@@ -2367,7 +2367,7 @@ private api_intf_location_exited(){
 	Map p=(Map)params
 	String deviceId=sMs(p,'device')
 	String dni=sMs(p,'dni')
-	def device=getChildDevices().find{ ((String)it.getDeviceNetworkId()==dni) || (hashId(it.id)==deviceId) }
+	def device=wgetChildDevices().find{ ((String)it.getDeviceNetworkId()==dni) || (hashId(it.id)==deviceId) }
 	if(device && p.place) device.processEvent([(sNM): 'exited', place: p.place, places: state.settings.places])
 }
 
@@ -2375,7 +2375,7 @@ private api_intf_location_updated(){
 	Map p=(Map)params
 	String deviceId=sMs(p,'device')
 	String dni=sMs(p,'dni')
-	def device=getChildDevices().find{ ((String)it.getDeviceNetworkId()==dni) || (hashId(it.id)==deviceId) }
+	def device=wgetChildDevices().find{ ((String)it.getDeviceNetworkId()==dni) || (hashId(it.id)==deviceId) }
 	Map location=p.location ? (LinkedHashMap) new JsonSlurper().parseText(sMs(p,'location')) : [(sERR): "Invalid data"]
 	if(device) device.processEvent([(sNM): 'updated', location: location, places: state.settings.places])
 }
@@ -2597,7 +2597,6 @@ def findCreateFuel(Map req){
 			Integer t0= wgetChildApps().findAll{
 				(String)it.name==n && ((String)it.label)?.contains(' - ') && ((String)it.label)?.contains('||') }.collect{
 					((String)it.label).split(' - ')[0].toInteger() }.max()
-			//def t0=wgetChildApps().findAll{ (String)it.name==n }.collect{ ((String)it.label).split(' - ')[0].toInteger()}.max()
 			Integer id=(t0 ?: iZ) + i1
 			try{
 				result=addChildApp('ady624', n, "$id - $streamName")
@@ -2751,7 +2750,7 @@ Map getWData(){
 }
 
 String getOpenWeatherData(){
-	def childDevice = getChildDevice("OPEN_WEATHER${app.id}")
+	def childDevice = wgetChildDevice("OPEN_WEATHER${app.id}")
 	if(!childDevice){
 		doLog(sDBG,"Error: No Child Found")
 		return sNL
@@ -3092,12 +3091,12 @@ private getStorageApp(Boolean install=false){
 
 	String n1=handleWeat()
 	def weatDev
-	weatDev=getChildDevices().find{ (String)it.name==n1 }
+	weatDev=wgetChildDevices().find{ (String)it.name==n1 }
 
 	if(storageApp!=null){
 
 /*
-// Hubitat does not use storage app for settings for performance reasons;  Someone could have created it elsewhere in UI
+// Hubitat does not use storage app for settings for performance reasons; Someone could have created it elsewhere in UI
 		if(storageApp.getStorageSettings()!=null){ //migrate settings off of storage app
 			storageApp.getStorageSettings().findAll { it.key.startsWith('dev:') }.each {
 				app.updateSetting(it.key, [(sTYPE): 'capability', (sVAL): it.value.collect { it.id }])
@@ -3156,7 +3155,7 @@ private getStorageApp(Boolean install=false){
 
 def getWeatDev(){
 	String n=handleWeat()
-	def weatDev=getChildDevices().find{ (String)it.name==n }
+	def weatDev=wgetChildDevices().find{ (String)it.name==n }
 	return weatDev
 }
 
@@ -3300,7 +3299,7 @@ Map listAvailableDevices(Boolean raw=false, Boolean batch=true, Integer offset=i
 	if(raw || (Boolean)result.complete){
 		String n=handlePres()
 		List presenceDevices
-		presenceDevices=getChildDevices().findAll{ (String)it.name==n }
+		presenceDevices=wgetChildDevices().findAll{ (String)it.name==n }
 		if(presenceDevices && presenceDevices.size()){
 			if(raw){
 				result << presenceDevices.collectEntries{ dev -> [(hashId(dev.id)): dev]}
@@ -3469,7 +3468,7 @@ private String transformCommand(command, Map<String,Map> overrides, String dvn){
 		String mcommand=(String)override.value.r
 		def args= command.getArguments()?.toString()
 		if(override.value.s.toString()==args){
-			if(eric())debug "transformCommand device $dvn  cmd: $nm  -> $mcommand override: $override commandargs: $args"
+			if(eric())debug "transformCommand device $dvn cmd: $nm -> $mcommand override: $override commandargs: $args"
 			return mcommand
 		}
 	}
@@ -3868,6 +3867,8 @@ private Date wtoDateTime(String s){ return (Date)toDateTime(s) }
 private Date wtimeToday(String str,TimeZone tz){ return (Date)timeToday(str,tz) }
 Long wnow(){ return (Long)now() }
 List wgetChildApps(){ return (List)getChildApps() }
+def wgetChildDevice(String d){ return getChildDevice(d) }
+List wgetChildDevices(){ return (List)getChildDevices() }
 private wgetChildAppByLabel(String n){ getChildAppByLabel(n) }
 
 private Map renderRes(Map result){
@@ -3890,7 +3891,7 @@ private Map wrender(Map options=[:]){
 			try{
 				String a= string2gzip(s)
 				Integer nsz=a.size()
-				if(eric1())debug "options.data is $sz after compression $nsz  saving ${Math.round((1.0D-(nsz/sz))*1000.0D)/10.0D}%"
+				if(eric1())debug "options.data is $sz after compression $nsz saving ${Math.round((1.0D-(nsz/sz))*1000.0D)/10.0D}%"
 //				options[sDATA]=a
 //				options[sCE]=sGZIP
 			}catch(ignored){}
@@ -4246,7 +4247,7 @@ void addHsmEvent(evt){
 	String evV=evt.value.toString()
 	String evDesc=(String)evt.descriptionText
 	String nevDesc= normalizeString(evDesc)
-	if(eric())log.debug "received event: name: $evNm, value: $evV, Desc:$evDesc desc1: $nevDesc  json >> ${evt.jsonData}"
+	if(eric())log.debug "received event: name: $evNm, value: $evV, Desc:$evDesc desc1: $nevDesc json >> ${evt.jsonData}"
 
 	Boolean didw=getTheLock(sADDHSMEVT)
 
@@ -4256,9 +4257,9 @@ void addHsmEvent(evt){
 
 	if(evNm in ['hsmAlert','hsmRule','hsmRules']){
 		String s= evNm == 'hsmAlert' ? 'HSM Alert: ' : sBLK
-		String title=s+ evV + (evV=='rule' ? ',  '+evDesc : sBLK)
+		String title=s+ evV + (evV=='rule' ? ', '+evDesc : sBLK)
 		String src=s+ evV
-		String msg= evNm == 'hsmAlert' ?  'HSM '+evV+' Alert' : sNL
+		String msg= evNm == 'hsmAlert' ? 'HSM '+evV+' Alert' : sNL
 
 		alert=[
 				(sDATE):((Date)evt.date).getTime(),
@@ -5656,7 +5657,7 @@ Map getChildVirtDevices(){
 }
 
 // m - momentary - restrict to comparisons that accept virtual devices - g: includes 'v', or datatype match (e) executes
-// x - use all comparisons, and exclude by datatype && no g:v  (x mean attribute has history?)
+// x - use all comparisons, and exclude by datatype && no g:v (x mean attribute has history?)
 private Map<String,Map> virtualDevices(){
 	return [
 		date:			[ (sN): 'Date',				(sT): sDATE,		],
@@ -5801,7 +5802,7 @@ static String myObj(obj){
 	else return 'unknown'
 }
 
-/** Returns true if string is encoded device hash  */
+/** Returns true if string is encoded device hash */
 @CompileStatic
 private static Boolean isWcDev(String dev){ return (dev && dev.size()==34 && dev.startsWith(sCLN) && dev.endsWith(sCLN)) }
 
