@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update September 15, 2023 for Hubitat
+ * Last update September 28, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -321,6 +321,9 @@ static Boolean eric1(){ return false }
 @Field static final String sPTS='points'
 @Field static final String sTZ='tz'
 @Field static final String sZONEID='zoneid'
+@Field static final String sPAUSE='pause'
+@Field static final String sPAUSES='pauses'
+@Field static final String sRESUME='resume'
 
 @Field static final String sLOCID='locationId'
 @Field static final String sUSELFUELS='useLocalFuelStreams'
@@ -733,7 +736,7 @@ def pageMain(){
 			}
 
 			section(sectionTitleStr('Application Info')){
-				LinkedHashMap r9; r9=getTemporaryRunTimeData()
+				LinkedHashMap r9; r9= getTemporaryRunTimeData()
 				if(!isEnbl(r9))paragraph 'Piston is disabled by webCoRE'
 				if(!isAct(r9))paragraph 'Piston is paused'
 				if(sMs(r9,sBIN)!=sNL){
@@ -796,21 +799,27 @@ def pageClear(){
 	}
 }
 
-void clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean all=false,Boolean reset=false){
+/**
+ * clear data caches for this piston; calls clearMyCache
+ * @param ccache data + clear code cache
+ * @param some data + clear logs
+ * @param most data + clear trace and stats
+ * @param all all of above + clear local variables
+ * @param reset data + reset log/stats settings
+ */
+Map clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean all=false,Boolean reset=false){
 	String meth
 	meth='clear1'
 	if(some||all)state.put(sLOGS,[])
 	if(most||all){ state.put(sTRC,[:]);state.put(sSTATS,[:]) }
 	if(reset){wappRemoveSetting(sMLOGS); wappRemoveSetting(sMSTATS); wappRemoveSetting(sLOGHE) }
 	cleanState()
+	LinkedHashMap tRtData, r9
+	r9= null
 	if(all){
 		meth+=' all'
-		LinkedHashMap tRtData,r9
-		tRtData=getTemporaryRunTimeData()
-		Boolean act=isAct(tRtData)
-		Boolean dis=!isEnbl(tRtData)
-		clearReadFLDs(tRtData)
 
+		tRtData= getTemporaryRunTimeData()
 		String pNm=sMs(tRtData,snId)
 		tRtData=null
 
@@ -819,8 +828,7 @@ void clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean al
 		state.put(sST,[:])
 		state.put(sVARS,[:])
 		state.put(sSTORE,[:])
-		state.put('pauses',lZ)
-		clearMyCache(meth)
+		state.put(sPAUSES,lZ)
 
 		getTheLock(pNm,meth)
 		theSemaphoresVFLD.put(pNm,lZ)
@@ -829,14 +837,28 @@ void clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean al
 		theQueuesVFLD=theQueuesVFLD // forces volatile cache flush
 		releaseTheLock(pNm)
 
-		if(act && !dis){
-			tRtData=getTemporaryRunTimeData()
-			getRunTimeData(tRtData,null,true,true,true) //reinitializes cache variables; caches piston
-			tRtData=null
-		}
 	}
 	clearMyCache(meth)
+	tRtData= getTemporaryRunTimeData()
+	if(all){
+		clearReadFLDs(tRtData)
+		Boolean act=isAct(tRtData)
+		Boolean dis=!isEnbl(tRtData)
+		if(act && !dis){
+			r9= getRunTimeData(tRtData,null,true,true,true) //reinitializes cache variables; caches piston
+//		}else{
+//			r9= getRunTimeData(tRtData,null,false,true,true)
+		}
+//	}else{
+//		r9= getRunTimeData(tRtData,null,false,true,true)
+	}
+	if(r9==null) r9= tRtData
+	Map nRtd=shortRtd(r9)
+	tRtData=null
+	r9=null
+	clearMyCache(meth)
 	if(ccache)clearMyPiston(meth)
+	return nRtd
 }
 
 def pageClearAll(){
@@ -995,7 +1017,7 @@ def pageDumpPCache(){
 
 def pageDumpHelper(Integer i,String nm,String desc){
 	LinkedHashMap pis,r9
-	r9=getRunTimeData()
+	r9= getRunTimeData()
 	Boolean shorten,inMem,useCache
 	shorten=true; inMem=false; useCache=false
 	switch(i){
@@ -1064,7 +1086,7 @@ void initialize(){
 	String tt3=tt2.toString()
 	if(tt1==sNL) setLoggingLevel(tt2 ? tt3:s0,false)
 	else if(tt1!=tt3) setLoggingLevel(tt1,false)
-	if(bIs(gtState(),sACT)) resume()
+	if(bIs(gtState(),sACT)) resumeP()
 	else clearMyCache('initialize')
 }
 
@@ -1090,7 +1112,7 @@ Boolean isInstalled(){
 @CompileStatic
 Map get(Boolean minimal=false){ // minimal is backup
 	LinkedHashMap r9
-	r9=getRunTimeData()
+	r9= getRunTimeData()
 	Map rVal
 	rVal=[
 		(sMETA): [
@@ -1187,6 +1209,7 @@ private static String decodeEmoji(String value){
 
 @Field static Map<String,Map> thePistonCacheFLD=[:]
 
+/** clear piston code cache */
 private void clearMyPiston(String meth=sNL){
 	String pNm=sAppId()
 	if(pNm.length()==iZ)return
@@ -1206,6 +1229,13 @@ private void clearMyPiston(String meth=sNL){
 	}
 }
 
+/**
+ * get the piston in Map format
+ * @param shorten optimiztion piston
+ * @param inMem optimize for memory cache
+ * @param useCache use cached version if available
+ * @return
+ */
 private LinkedHashMap recreatePiston(Boolean shorten=false,Boolean inMem=false,Boolean useCache=true){
 	if(shorten && inMem && useCache){
 		String pNm=sAppId()
@@ -1303,7 +1333,7 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 	releaseTheLock(mSmaNm)
 	Integer i= iMs(gtState(),sBLD)
 	Boolean b= bIs(gtState(),sACT)
-	if(i==i1 || b)r9=resume(piston,false)
+	if(i==i1 || b)r9= resumeP(piston,false)
 	else clearMyCache(meth)
 	return [(sACT):b,(sBLD):i,(sMODFD):lMs(gtState(),sMODFD),(sST):mMs(gtState(),sST),rtData:r9]
 }
@@ -1329,6 +1359,17 @@ private static void fill_STMT(){
 }
 
 
+/**
+ * add statement ids to piston
+ * @param shorten optimize piston
+ * @param inMem optimize for memory caching
+ * @param node
+ * @param mId
+ * @param existingIds
+ * @param requiringIds
+ * @param level
+ * @return
+ */
 @CompileStatic
 private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Map<String,Integer> existingIds=[:],List<Map> requiringIds=[],Integer level=iZ){
 	String nodeT=sMt(node)
@@ -1745,14 +1786,18 @@ void config(Map data){ // creates a new piston
 	clearMyCache('config')
 }
 
+/**
+ * called to pause this piston
+ * @return updated runTimeData for IDE
+ */
 @CompileStatic
-Map pausePiston(){
+Map pauseP(){
 	assignSt(sACT,false)
 	cleanState()
 	clearMyCache('pauseP')
 
 	LinkedHashMap r9
-	r9=getRunTimeData()
+	r9= getRunTimeData()
 	Boolean lg=isInf(r9)
 	Map msg; msg=null
 	if(lg){
@@ -1772,16 +1817,21 @@ Map pausePiston(){
 	assignSt(sACT,false)
 	assignSt(sST,[:]+mMs(r9,sST))
 	wstateRemove(sLEVT)
-	clear1(true,false,false,false)	// calls clearMyCache(meth) && clearMyPiston
-	Map nRtd=shortRtd(r9)
+	Map nRtd= clear1(true,false,false,false)	// calls clearMyCache(meth) && clearMyPiston
 	Map t=[ (sACT):false ]
 	nRtd[sRESULT]=t
 	r9=null
 	return nRtd
 }
 
+/**
+ * resume piston, and initialize its subscriptions & states
+ * @param piston
+ * @param sndEvt
+ * @return ide runtime data
+ */
 @CompileStatic
-Map resume(LinkedHashMap piston=null,Boolean sndEvt=true){
+Map resumeP(LinkedHashMap piston=null,Boolean sndEvt=true){
 	assignSt(sACT,true)
 	assignSt(sSUBS,[:])
 	assignSt(sSCHS,[])
@@ -1790,7 +1840,7 @@ Map resume(LinkedHashMap piston=null,Boolean sndEvt=true){
 	cleanState()
 
 	String mSmaNm=sAppId()
-	getTheLock(mSmaNm,'resume')
+	getTheLock(mSmaNm,sRESUME)
 	theSemaphoresVFLD[mSmaNm]=lZ
 	theSemaphoresVFLD=theSemaphoresVFLD
 	theQueuesVFLD[mSmaNm]=[]
@@ -1800,12 +1850,12 @@ Map resume(LinkedHashMap piston=null,Boolean sndEvt=true){
 	clearMyCache('resumeP')
 
 	LinkedHashMap tmpRtD,r9
-	tmpRtD=getTemporaryRunTimeData()
+	tmpRtD= getTemporaryRunTimeData()
 	Map msg=timer 'Piston started',tmpRtD,iN1
 	if(piston!=null)tmpRtD[sPISTN]=piston
 	Boolean lg=isInf(tmpRtD)
 	if(lg)info 'Starting piston... ('+sHVER+')',tmpRtD,iZ
-	r9=getRunTimeData(tmpRtD,null,true,false,false) //performs subscribeAll; reinitializes cache variables
+	r9= getRunTimeData(tmpRtD,null,true,false,false) //performs subscribeAll; reinitializes cache variables
 	checkVersion(r9)
 	if(lg)info msg,r9
 	updateLogs(r9)
@@ -1823,6 +1873,7 @@ Map resume(LinkedHashMap piston=null,Boolean sndEvt=true){
 	return nRtd
 }
 
+/** get short form of runTime Data */
 @CompileStatic
 static Map shortRtd(Map r9){
 	Map<String,Object> st=[:]+mMs(r9,sST)
@@ -1879,11 +1930,6 @@ Map updModified(Long t){
 	assignSt(sMODFD,t)
 	clearMyCache(sMODFD)
 	return [(sMODFD):t]
-}
-
-Map clearLogs(){
-	clear1()
-	return [:]
 }
 
 
@@ -2056,7 +2102,7 @@ private static Map cleanEvt(Map evt){
 @Field static final String sWAITED='waited'
 @Field static final String sEXITOUT='exitOut'
 
-// This can a) lock semaphore b) wait for semaphore c) queue event d) just fall through (no locking or waiting)
+/** This can a) lock semaphore b) wait for semaphore c) queue event d) just fall through (no locking or waiting) */
 @CompileStatic
 private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queue,Map r9){
 	Long tt1,startTime,r_semaphore,semaphoreDelay,lastSemaphore
@@ -2096,7 +2142,7 @@ private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queu
 					evtQ=theQueuesVFLD[mSmaNm]
 					evtQ=evtQ!=null ? evtQ:(List<Map>)[]
 					qsize=evtQ.size()
-					if(qsize>i12)clrC=true
+					if(qsize>i12) clrC=true
 					else{
 						evtQ.push(mEvt)
 						theQueuesVFLD[mSmaNm]=evtQ
@@ -2116,7 +2162,7 @@ private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queu
 		releaseTheLock(mSmaNm)
 		if(clrC){
 			error "large queue size ${qsize} clearing",r9
-			clear1(true,true,true,true)
+			clear1(true,true,true,true) // resets semaphore
 		}
 	}
 	return [
@@ -2131,6 +2177,7 @@ private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queu
 @Field volatile static LinkedHashMap<String,LinkedHashMap> theCacheVFLD=[:] // each piston has a map
 
 @Field static final String sCLRMC='clearMyCache'
+/** clear Piston cache */
 @CompileStatic
 private void clearMyCache(String meth=sNL){
 	String appStr=sAppId()
@@ -2426,6 +2473,15 @@ private LinkedHashMap getTemporaryRunTimeData(Long startTime=wnow()){
 	return r9
 }
 
+/**
+ * get full runTime data
+ * @param ir9 some initial runTimeData (optional)
+ * @param retSt lock data
+ * @param doit reset local variables initial value, perform subscriptions
+ * @param shorten optimize piston
+ * @param inMem optimize for in memory
+ * @return
+ */
 @CompileStatic
 private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=null,Boolean doit=false,Boolean shorten=true,Boolean inMem=false){
 	LinkedHashMap r9,piston,m1
@@ -2441,7 +2497,7 @@ private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=
 		lended=r9[sLSEND]!=null ? lMs(r9,sLSEND):lZ
 		piston=r9[sPISTN]!=null ? (LinkedHashMap)r9[sPISTN]:null
 		dbgLevel=r9[sDBGLVL]!=null ? iMs(r9,sDBGLVL):iZ
-	}else r9=getTemporaryRunTimeData(started)
+	}else r9= getTemporaryRunTimeData(started)
 	Long timestamp=lMs(r9,sTMSTMP)
 
 	if(r9[sTMP]!=null) r9.remove(sTMP)
@@ -2593,32 +2649,65 @@ private static Boolean stJson1(String c){ return c!=sNL && c.startsWith(sLB) && 
 
 /** EVENT HANDLING								**/
 
+/** device events */
+void deviceHandler(event){ handleEvents(event) }
+
 @CompileStatic
 Map commonHandle(String nm,v=null){
 	handleEvents([(sDATE):new Date(),(sDEV):gtLocation(),(sNM):nm,(sVAL):v!=null? v:wnow()])
 	return [:]
 }
 
+/* IDE calls via parent */
+
 Map test(){ commonHandle('test') }
-
-Map clearCache(){ commonHandle(sCLRC) }
-
-Map clearLogsQ(){ commonHandle(sCLRL) }
-
-Map clearAllQ(){ commonHandle(sCLRA) }
 
 Map clickTile(tidx){ commonHandle(sTILE,tidx); return (Map)gtSt(sST) ?: [:] }
 
-void resumeHandler(){ commonHandle(sPSTNRSM) }
-
-void deviceHandler(event){ handleEvents(event) }
-
-Map execute(Map data,String src){
-	handleEvents([(sDATE):new Date(),(sDEV):gtLocation(),(sNM):'execute',(sVAL): src!=null ? src:wnow(),(sJSOND):data],false)
+Map clearLogs(){
+	clear1()
 	return [:]
 }
 
+/* parent calls that each piston must process on itself */
+
+Map clearLogsQ(){ commonHandle(sCLRL) }
+
+Map clearCache(){ commonHandle(sCLRC) }
+
+Map clearAllQ(){ commonHandle(sCLRA) }
+
+Map pausePiston() {
+	commonHandle(sPAUSE) // this may queue, below fakes response
+	fakeResp(false)
+}
+
+Map fakeResp(Boolean v){
+	Map tmpRtD, nRtD
+	tmpRtD= getTemporaryRunTimeData()
+	nRtD= shortRtd(tmpRtD) // getRunTimeData(tmpRtD,null,false,true,true))
+	nRtD[sACT]=v
+	Map t=[ (sACT):v ]
+	nRtD[sRESULT]=t
+	return nRtD
+}
+
+Map resume(){
+	commonHandle(sRESUME) // this may queue, below fakes response
+	fakeResp(true)
+}
+
+/** called by parent */
+void execute(Map data,String src){
+	handleEvents([(sDATE):new Date(),(sDEV):gtLocation(),(sNM):'execute',(sVAL): src!=null ? src:wnow(),(sJSOND):data],false)
+}
+
+
+/** called as runInMillis */
+void resumeHandler(){ commonHandle(sPSTNRSM) }
+
 @Field static final String sTIMHNDR='timeHandler'
+/** called as runInMillis */
 void timeHandler(event){ timeHelper(event,false) }
 
 void timeHelper(event,Boolean recovery){
@@ -2652,7 +2741,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	Long startTime=wnow()
 	LinkedHashMap event,tmpRtD,retSt
 	event=fixEvt(evt)
-	tmpRtD=getTemporaryRunTimeData(startTime)
+	tmpRtD= getTemporaryRunTimeData(startTime)
 	Map msg=timer sEPS,tmpRtD,iN1
 	String evntName; evntName=sMs(event,sNM)
 	String evntVal; evntVal="${event[sVAL]}".toString()
@@ -2673,25 +2762,6 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		info mymsg,tmpRtD,iZ
 	}
 
-	Boolean clrC=evntName==sCLRC
-	Boolean clrL=evntName==sCLRL
-	Boolean clrA=evntName==sCLRA
-
-	Boolean act=isAct(tmpRtD)
-	Boolean dis=!isEnbl(tmpRtD)
-	if(!act || dis){
-		if(lg!=iZ){
-			String tstr=' active, aborting piston execution.'
-			if(!act)msg[sM]='Piston is not'+tstr+' (Paused)' // pause/resume piston
-			if(dis)msg[sM]='Kill switch is'+tstr
-			info msg,tmpRtD
-		}
-		updateLogs(tmpRtD)
-		if(clrL)clear1(true,true,true,false,true)
-		else if(clrC)clear1(true,false,false,false)
-			else if(clrA)clear1(true,true,true,true)
-		return
-	}
 
 	Boolean myPep=isPep(tmpRtD)
 	Boolean strictSync=true // could be a setting
@@ -2717,6 +2787,53 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	}
 	tmpRtD[sLSEND]=wnow()
 
+
+	Boolean clrC; clrC=evntName==sCLRC
+	Boolean clrL=evntName==sCLRL
+	Boolean clrA=evntName==sCLRA
+	Boolean pause=evntName==sPAUSE
+	Boolean resume=evntName==sRESUME
+
+	if(pause || resume){
+		Map nrtD
+		updateLogs(tmpRtD)
+		if(resume){
+			nrtD=resumeP()
+		}else{ // pause
+			nrtD=pauseP()
+		}
+		relaypCall(nrtD)
+		tmpRtD= getTemporaryRunTimeData(startTime)
+	}
+
+	Boolean act=isAct(tmpRtD)
+	Boolean dis=!isEnbl(tmpRtD)
+	Boolean end = !act || dis
+	if(end){
+		if(lg!=iZ){
+			String tstr=' active, aborting piston execution.'
+			if(!act)msg[sM]='Piston is not'+tstr+' (Paused)' // pause/resume piston
+			if(dis)msg[sM]='Kill switch is'+tstr
+			info msg,tmpRtD
+		}
+	}
+	if(clrC||clrL||clrA){
+		updateLogs(tmpRtD)
+		Map nrtD; nrtD= null
+		if (clrL) nrtD= clear1(true, true, true, false, true)
+		else if (clrA) nrtD= clear1(true, true, true, true) // resets semaphore
+		else if(clrC){
+			Long lexec= lMs(gtState(),sLEXEC)
+			if(lexec==null || elapseT(lexec) > 3660000L) nrtD= clear1(true, false, false, false)
+			else nrtD= shortRtd(tmpRtD) // getRunTimeData(tmpRtD,null,false,true,true))
+		}
+		relaypCall(nrtD)
+		//if(clrA) return // no longer have semaphore
+		tmpRtD= getTemporaryRunTimeData(startTime)
+	}
+
+
+
 //measure how Long first state access takes
 	Long stAccess; stAccess=lZ
 	if(lg>iZ && !myPep){
@@ -2733,7 +2850,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 
 	tmpRtD[sPCACHE]=[:]
 	LinkedHashMap r9
-	r9=getRunTimeData(tmpRtD,retSt,false,true,true)
+	r9= getRunTimeData(tmpRtD,retSt,false,true,true)
 	tmpRtD=null
 	retSt=null
 	checkVersion(r9)
@@ -2760,13 +2877,10 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	r9[sTPAUSE]=lZ
 	((Map)r9[sSTATS])[sTIMING]=[(sT):startTime,(sD):eventDelay>lZ ? eventDelay:lZ,(sL):elapseT(startTime)] as LinkedHashMap
 
-	if(clrC||clrL||clrA){
-		if(clrL)clear1(true,true,true,false,true)
-		else if(clrA)clear1(true,true,true,true)
-			else if(r9[sLEXEC]==null || elapseT(lMs(r9,sLEXEC))>3660000L)clear1(true,false,false,false)
-	}else{
-		Long eStrt=wnow()
+	Boolean success,firstTime; success=true; firstTime=false
+	Long eStrt=wnow()
 
+	if( !(end||clrC||clrL||clrA||pause||resume) ){ // if not an event we already handled...
 		//debug
 		Long tl=lMs(r9,sNSCH)
 		String lsts='lastSchedule'
@@ -2776,8 +2890,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		}
 
 		Map msg2; msg2=null
-		Boolean success,firstTime,syncTime
-		success=true
+		Boolean syncTime
 		firstTime=true
 		if(!(evntName in ListTIMEASYNC)){
 			if(lg>i1){
@@ -2976,7 +3089,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			Map theEvent
 			evtQ=theQueuesVFLD[mSmaNm]
 			List<Map>evtList=evtQ.sort{ Map it -> lMt(it) }
-			theEvent=evtList.remove(0)
+			theEvent=evtList.remove(iZ)
 			Integer qsize=evtList.size()
 			theQueuesVFLD[mSmaNm]=evtList
 			theQueuesVFLD=theQueuesVFLD
@@ -3526,6 +3639,7 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 }
 
 @Field static final String sUPDL='updateLogs'
+/** store this run logs to persistent state and update caches */
 @CompileStatic
 private void updateLogs(Map r9,Long lastExecute=null){
 	if(!r9)return
@@ -4111,10 +4225,9 @@ private void doPause(String mstr,Long delay,Map r9,Boolean ign=false){
 		r9[sTPAUSE]=t2+actDelay
 		r9[sLSTPAUSE]=t1
 
-		String s2='pauses'
-		t2=lMs(gtState(),s2)
+		t2=lMs(gtState(),sPAUSES)
 		t2=t2!=null ? t2:lZ
-		assignSt(s2,t2+l1)
+		assignSt(sPAUSES,t2+l1)
 	}
 }
 
@@ -5877,8 +5990,8 @@ private Long vcmd_executePiston(Map r9,device,List prms){
 	String desc="webCoRE: Piston ${gtAppN()} requested execution of piston $pistonId".toString()
 	Map data=[:]
 	for(String argument in arguments) if(argument)data[argument]=oMv(getVariable(r9,argument))
-	if(wait) if(!wexecutePiston(pistonId,data,selfId)) error desc+" Piston not found",r9
-	if(!wait) sendExecuteEvt(pistonId,selfId,desc,data)
+	if(wait){ if(!wexecutePiston(pistonId,data,selfId)) error desc+" Piston not found",r9 }
+	else sendExecuteEvt(pistonId,selfId,desc,data)
 	return lZ
 }
 
@@ -7296,8 +7409,8 @@ private Double evalDecimalOperand(Map r9,Map operand){
 }
 
 
-/** deal with cache for triggers refreshing */
 @Field volatile static Map<String,Boolean> needUpdateFLD=[:]
+/** deal with cache for triggers refreshing */
 void stNeedUpdate(){
 	String myId=sAppId()
 	if(!myId)return
@@ -9046,6 +9159,7 @@ private List<String> expandDeviceList(Map r9,List<String> devs,Boolean localVars
 //def appHandler(evt){
 //}
 
+/** return a device or location object for idOrName */
 @CompileStatic
 private getDevice(Map r9,String idOrName, Boolean rptMissing=true){
 	if(idOrName in (List<String>)r9[sALLLOC])return gtLocation()
@@ -10882,7 +10996,7 @@ private Map func_sqrt(Map r9,List<Map> prms){
 private Map func_ispistonpaused(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnErr('ispistonpaused(pistonName)')
 	String s=strEvalExpr(r9,prms[iZ])
-	Boolean r= (Boolean)parent.isPisPaused(s)
+	Boolean r= wisPisPaused(s)
 	if(r==(Boolean)null)
 		return rtnErr('ispistonpaused(pistonName) piston not found')
 	rtnMapB(r)
@@ -12902,8 +13016,16 @@ private Map log(message,Map r9,Integer shift=iN2,Exception err=null,String cmd=s
 				myMsg=myMsg[iZ..1023]+'...[TRUNCATED]'
 			}
 			List<String> msgs=!hasErr ? myMsg.tokenize("\r"):[myMsg]
+			// try to not to use too much runtime memory on logs that will just be truncated anyway
+			Integer lim; lim=iMs(r9,sMLOGS)
+			lim = Math.max(lim,i50)
+			List logs; logs = liMs(r9,sLOGS)
+			Integer lsz; lsz=logs.size()
 			for(String msg in msgs){
-				liMs(r9,sLOGS).push([(sO):elapseT(lMs(r9,sTMSTMP)),(sP):prefix2,(sM):msg+(hasErr ? " $merr".toString():sBLK),(sC):mcmd])
+				if(lsz < lim){
+					liMs(r9,sLOGS).push([(sO):elapseT(lMs(r9,sTMSTMP)),(sP):prefix2,(sM):msg+(hasErr ? " $merr".toString():sBLK),(sC):mcmd])
+					lsz++
+				}
 			}
 		}
 		String myPad=sSPC
@@ -13943,10 +14065,12 @@ private List wgetPushDev(){ return (List)parent.getPushDev() }
 private Boolean wexecutePiston(String pistonId,Map data,String selfId){ return (Boolean)parent.executePiston(pistonId,data,selfId) }
 private Boolean wpausePiston(String pistonId,String selfId){ return (Boolean)parent.pausePiston(pistonId,selfId) }
 private Boolean wresumePiston(String pistonId,String selfId){ return (Boolean)parent.resumePiston(pistonId,selfId) }
+private Boolean wisPisPaused(String pistonId){ return (Boolean)parent.isPisPaused(pistonId) }
 private Map wgetGStore(){ return (Map)parent.getGStore() }
 private Map wlistAvailableDevices(Boolean raw){ return parent.listAvailableDevices(raw) }
 private Map wgetWData(){ return [:]+(Map)parent.getWData() }
 private Map wlistAvailableVariables(){ return (Map)parent.listAvailableVariables() }
+
 private String sPAppId(){ return ((Long)parent.id).toString() }
 
 private String sAppId(){ return ((Long)app.id).toString() }

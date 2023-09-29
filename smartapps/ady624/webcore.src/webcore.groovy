@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update September 15, 2023 for Hubitat
+ * Last update September 28, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20230828_HE'
-@Field static final String sHVERSTR='v0.3.114.20230828_HE - September 15, 2023'
+@Field static final String sHVERSTR='v0.3.114.20230828_HE - September 28, 2023'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -2229,7 +2229,7 @@ private common_pause_resume(Map params, String oper, String msg){
 			if(oper!='resume')
 				rtData=(Map)piston.pausePiston()
 			else
-				rtData=(Map)piston.resume(null,true)
+				rtData=(Map)piston.resume()
 
 			result=[:]+(Map)rtData.result
 			updateRunTimeData(rtData)
@@ -2505,7 +2505,7 @@ private api_intf_variable_set(){
 				if(chgd){
 					assignAS(sVARS,globalVars)
 					clearGlobalPistonCache("dashboard set")
-					clearBaseResult('api_intf_variable_set')
+					//clearBaseResult('api_intf_variable_set')
 					//noinspection GroovyVariableNotAssigned
 					sendVariableEvent(result)
 				}else trace meth+"SET webcore global FAILED $name"
@@ -2985,6 +2985,8 @@ void resetMemSt(String meth,String wName){
 }
 
 @Field static final String sVC='ver check'
+/** check if webCoRE version has been updated */
+@CompileStatic
 void verCheck(String wName){
 	Boolean uuidChg= uidChgd()
 	if(verFLD[wName]==sVER && HverFLD[wName]==sHVER && !uuidChg) return
@@ -3925,21 +3927,58 @@ static String string2gzip(String s){
 @Field static final String sNSCH='nextSchedule'
 @Field static final String sPIS='piston'
 
-@Field volatile static Map<String,Map<String,Long>> p_executionFLD=[:]
+@Field static final Double d1=1.0D
+@Field static final String sRELAY='pCallupdateeRunTimeData'
 
+@CompileStatic
+private Long elapseT(Long t,Long n=wnow()){ return Math.round(d1*n-t) }
+
+@Field volatile static Map<String,Map<String,Map>> p_executionFLD=[:]
+
+/**
+ * wrapper to gather global piston execution statistics; calls updateRunTimeData
+ * @param data
+ */
 @CompileStatic
 void pCallupdateRunTimeData(Map data){
 	if(!data || !data[sID]) return
+	Long start= (Long)data[sTMSTMP] ?:wnow()
+
 	String id=(String)data[sID]
 	String wName=sAppId()
+
+	Boolean didw=getTheLock(sRELAY)
 	if(p_executionFLD[wName]==null){ p_executionFLD[wName]=(Map)[:]; p_executionFLD=p_executionFLD }
-	Long cnt; cnt=p_executionFLD[wName][id]!=null ? (Long)p_executionFLD[wName][id] : 0L
+
+	Map record = p_executionFLD[wName][id]!=null ? (Map)p_executionFLD[wName][id] : [:]
+
+	List runs; runs = (List)record.execs!=null ? (List)record.execs : []
+	runs << [s: start, e: wnow()]
+	if(runs.size() > 200) runs = runs.drop(20)
+
+	Long cnt; cnt= record.cnt!=null ? (Long)record.cnt : 0L
 	cnt +=1L
-	p_executionFLD[wName][id]=cnt
+
+	Long tot; tot= record.tot!=null ? (Long)record.tot : 0L
+	tot += elapseT(start)
+
+	record.cnt = cnt
+	record.execs = runs // add
+	record.tot = tot
+
+	p_executionFLD[wName][id]= record
 	p_executionFLD=p_executionFLD
+	releaseTheLock(sRELAY)
+
 	updateRunTimeData(data,wName,id)
 }
 
+/**
+ * called after piston execution/state change to update global variables, and piston state for IDE, will call clearBaseResult
+ * @param data - map of updated piston data
+ * @param wNi - optional instance id
+ * @param idi - optional piston id
+ */
 @CompileStatic
 void updateRunTimeData(Map data, String wNi=sNL, String idi=sNL){
 	if(!data || !data[sID]) return
@@ -3950,7 +3989,7 @@ void updateRunTimeData(Map data, String wNi=sNL, String idi=sNL){
 		def am=gtAS(sVARS)
 		Map<String,Map> vars= am? (Map<String,Map>)am : [:]
 		Boolean mdfd; mdfd=false
-		for(var in (Map<String,Map>)data[sGVCACHE]){
+		for(Map.Entry<String,Map>var in ((Map<String,Map>)data[sGVCACHE]) ){
 			String k=(String)var.key
 			if(k!=sNL && k.startsWith(sAT) && vars[k]){
 				def val=var.value[sV]
@@ -4015,9 +4054,7 @@ void updateRunTimeData(Map data, String wNi=sNL, String idi=sNL){
 
 @Field volatile static Map<String,Map<String,Map>> pStateFLD=[:]
 
-/**
- * store cached piston metadata
- */
+/** store cached piston metadata */
 @CompileStatic
 void ptMeta(String wName, String id, Map piston){
 	if(wName && id){
@@ -4063,26 +4100,35 @@ Map gtMeta(ichld, String wName, String pid){
 	return meta
 }
 
+/** child call to pause a piston */
 Boolean pausePiston(String pistonId,String src){
 	def piston=findPiston(pistonId,pistonId)
 	if(piston){
 		Map rtData=piston.pausePiston()
 		updateRunTimeData(rtData)
+		String wName=sAppId()
+		clearCachedchildApps(wName)
+		runIn(21, broadcastPistonList)
 		return true
 	}
 	return false
 }
 
+/** child call to resume a piston */
 Boolean resumePiston(String pistonId,String src){
 	def piston=findPiston(pistonId,pistonId)
 	if(piston){
-		Map rtData=piston.resume(null,true)
+		Map rtData=piston.resume()
 		updateRunTimeData(rtData)
+		String wName=sAppId()
+		clearCachedchildApps(wName)
+		runIn(21, broadcastPistonList)
 		return true
 	}
 	return false
 }
 
+/** child call to find out if a piston is paused */
 Boolean isPisPaused(String pistonId){
 	def piston=findPiston(pistonId,pistonId)
 	Map meta; meta=null
@@ -4099,10 +4145,11 @@ Boolean isPisPaused(String pistonId){
 	return false
 }
 
+/** child call to have parent execute a piston */
 Boolean executePiston(String pistonId, Map data, String src){
 	def piston=findPiston(pistonId,pistonId)
 	if(piston){
-		Map a=piston.execute(data, src)
+		piston.execute(data, src)
 		return true
 	}
 	return false
@@ -6181,14 +6228,16 @@ def pageDumpExecution(){
 	String wName=sAppId()
 	if(p_executionFLD[wName]==null){ p_executionFLD[wName]=(Map)[:]; p_executionFLD=p_executionFLD }
 	String n=handlePistn()
+	String t='tot'
 	String c='cnt'
 	List<Map> b= wgetChildApps().findAll{ (String)it.name==n }.sort{ (String)it.label }.collect{
 		String pid=hashPID(it.id)
-		[ (sID): pid, (sNM): normalizeLabel(it), (c): p_executionFLD[wName][pid] ]
+		Map a= p_executionFLD[wName][pid] ?: [:]
+		[ (sID): pid, (sNM): normalizeLabel(it), (c): a.cnt, (t): a.tot  ]
 	}
 	LinkedHashMap<String,Map> a; a=[:]
 	b.sort{ Map bb -> (bb[c]!= null ? -(Long)bb[c] : bb[c]) }.each { Map it ->
-		if((Long)it[c]) a= a+ [(sMs(it,sID)): [(sNM):it[sNM], (c): it[c]]] as LinkedHashMap<String, Map>
+		if((Long)it[c]) a= a+ [ (sMs(it,sID)): [(sNM):it[sNM], (c): it[c], (t): it[t]] ] as LinkedHashMap<String, Map>
 	}
 	String message=getMapDescStr(a)
 	return dynamicPage((sNM):sPDPEXC,(sTIT):sBLK,uninstall:false){
