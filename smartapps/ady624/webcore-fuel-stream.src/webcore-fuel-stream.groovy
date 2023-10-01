@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update August 31, 2023 for Hubitat
+ *  Last update October 1, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230222_HE'
+@Field static final String sHVER='v0.3.114.20230828_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -1584,7 +1584,7 @@ def local_graph_url(){
 	List<String> container
 	container=[]
 	hubiForm_section("Local Graph URL", i1, "link", sBLK){
-		String s= "${state.localEndpointURL}graph/?access_token=${state.endpointSecret}"
+		String s= makeCallBackURL('graph/')
 		container << hubiForm_text(s, s)
 
 		hubiForm_container(container, i1)
@@ -2136,7 +2136,7 @@ class Loader{
 }
 
 function getOptions(){
-	return jQuery.get("${state.localEndpointURL}getOptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getOptions/')}", (data) =>{
 		options=data;
 		console.log("Got Options");
 		console.log(options);
@@ -2144,7 +2144,7 @@ function getOptions(){
 }
 
 function getSubscriptions(){
-	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getSubscriptions/')}", (data) =>{
 		console.log("Got Subscriptions");
 		console.log(data);
 		subscriptions=data;
@@ -2153,7 +2153,7 @@ function getSubscriptions(){
 }
 
 function getGraphData(){
-	return jQuery.get("${state.localEndpointURL}getData/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getData/')}", (data) =>{
 		console.log("Got Graph Data");
 		console.log(data);
 		graphData=data;
@@ -2267,7 +2267,6 @@ window.onBeforeUnload=onBeforeUnload;
 
 	return html
 }
-
 
 //oauth endpoints
 
@@ -2684,7 +2683,7 @@ class Loader{
 }
 
 function getOptions(){
-	return jQuery.get("${state.localEndpointURL}getOptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getOptions/')}", (data) =>{
 		options=data;
 		console.log("Got Options");
 		console.log(options);
@@ -2692,7 +2691,7 @@ function getOptions(){
 }
 
 function getSubscriptions(){
-	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getSubscriptions/')}", (data) =>{
 		console.log("Got Subscriptions");
 		console.log(data);
 		subscriptions=data;
@@ -2701,7 +2700,7 @@ function getSubscriptions(){
 }
 
 function getGraphData(){
-	return jQuery.get("${state.localEndpointURL}getData/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getData/')}", (data) =>{
 		console.log("Got Graph Data");
 		console.log(data);
 		graphData=data;
@@ -3354,7 +3353,7 @@ class Loader{
 }
 
 function getOptions(){
-	return jQuery.get("${state.localEndpointURL}getOptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getOptions/')}", (data) =>{
 		console.log("Got Options");
 		console.log(data);
 		options=data;
@@ -3362,7 +3361,7 @@ function getOptions(){
 }
 
 function getSubscriptions(){
-	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getSubscriptions/')}", (data) =>{
 		console.log("Got Subscriptions");
 		console.log(data);
 		subscriptions=data;
@@ -3371,7 +3370,7 @@ function getSubscriptions(){
 }
 
 function getGraphData(){
-	return jQuery.get("${state.localEndpointURL}getData/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getData/')}", (data) =>{
 		console.log("Got Graph Data");
 		console.log(data);
 		unparsedData=data;
@@ -4743,7 +4742,7 @@ class Loader{
 }
 
 function getOptions(){
-	return jQuery.get("${state.localEndpointURL}getOptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getOptions/')}", (data) =>{
 		options=data;
 		console.log("Got Options");
 		console.log(options);
@@ -4751,7 +4750,7 @@ function getOptions(){
 }
 
 function getSubscriptions(){
-	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getSubscriptions/')}", (data) =>{
 		subscriptions=data;
 		console.log("Got Subscriptions");
 		console.log(subscriptions);
@@ -4759,7 +4758,7 @@ function getSubscriptions(){
 }
 
 function getGraphData(){
-	return jQuery.get("${state.localEndpointURL}getData/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getData/')}", (data) =>{
 		console.log("Got Graph Data");
 		graphData=data;
 	});
@@ -5780,7 +5779,7 @@ class Loader{
 }
 
 function getOptions(){
-	return jQuery.get("${state.localEndpointURL}getOptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getOptions/')}", (data) =>{
 		options=data;
 		console.log("Got Options");
 		console.log(options);
@@ -5788,7 +5787,7 @@ function getOptions(){
 }
 
 function getSubscriptions(){
-	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getSubscriptions/')}", (data) =>{
 		console.log("Got Subscriptions");
 		subscriptions=data;
 
@@ -5828,7 +5827,7 @@ function getValue(data, date, attr){
 }
 
 function getGraphData(){
-	return jQuery.get("${state.localEndpointURL}getData/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getData/')}", (data) =>{
 		graphData=data;
 	});
 }
@@ -6771,7 +6770,7 @@ class Loader{
 }
 
 function getOptions(){
-	return jQuery.get("${state.localEndpointURL}getOptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getOptions/')}", (data) =>{
 		options=data;
 		console.log("Got Options");
 		console.log(options);
@@ -6779,7 +6778,7 @@ function getOptions(){
 }
 
 function getSubscriptions(){
-	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getSubscriptions/')}", (data) =>{
 		console.log("Got Subscriptions");
 		console.log(data);
 		subscriptions=data;
@@ -6788,7 +6787,7 @@ function getSubscriptions(){
 }
 
 function getGraphData(){
-	return jQuery.get("${state.localEndpointURL}getData/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getData/')}", (data) =>{
 		console.log("Got Graph Data");
 		console.log(data);
 		graphData=data;
@@ -7500,7 +7499,7 @@ class Loader{
 }
 
 function getOptions(){
-	return jQuery.get("${state.localEndpointURL}getOptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getOptions/')}", (data) =>{
 		options=data;
 		console.log("Got Options");
 		console.log(options);
@@ -7508,7 +7507,7 @@ function getOptions(){
 }
 
 function getSubscriptions(){
-	return jQuery.get("${state.localEndpointURL}getSubscriptions/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getSubscriptions/')}", (data) =>{
 		console.log("Got Subscriptions");
 		console.log(data);
 		subscriptions=data;
@@ -7517,7 +7516,7 @@ function getSubscriptions(){
 }
 
 function getGraphData(){
-	return jQuery.get("${state.localEndpointURL}getData/?access_token=${state.endpointSecret}", (data) =>{
+	return jQuery.get("${makeCallBackURL('getData/')}", (data) =>{
 		console.log("Got Graph Data");
 		console.log(data);
 		graphData=data;
@@ -8780,8 +8779,8 @@ def verifyDeviceCallback(response, data){
 String getPreviewWindow(String var, String page){
 
 	Map params=[
-			uri: "${state.localEndpointURL}",
-			path: "graph/?access_token=${state.endpointSecret}",
+			uri: getEndpointURL(),
+			path: "graph/?access_token=${getEndpointSecret()}",
 			requestContentType: "application/json",
 	]
 
@@ -8815,7 +8814,7 @@ String getPreviewWindow(String var, String page){
 	//<div>
 	html+="""
 <div class="iframe-container">
-	<iframe id="preview_frame" style="width: 100%; height: 100%; position: relative; z-index: 1; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAEq2lUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4KPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNS41LjAiPgogPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgeG1sbnM6ZXhpZj0iaHR0cDovL25zLmFkb2JlLmNvbS9leGlmLzEuMC8iCiAgICB4bWxuczp0aWZmPSJodHRwOi8vbnMuYWRvYmUuY29tL3RpZmYvMS4wLyIKICAgIHhtbG5zOnBob3Rvc2hvcD0iaHR0cDovL25zLmFkb2JlLmNvbS9waG90b3Nob3AvMS4wLyIKICAgIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIKICAgIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIgogICAgeG1sbnM6c3RFdnQ9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZUV2ZW50IyIKICAgZXhpZjpQaXhlbFhEaW1lbnNpb249IjIiCiAgIGV4aWY6UGl4ZWxZRGltZW5zaW9uPSIyIgogICBleGlmOkNvbG9yU3BhY2U9IjEiCiAgIHRpZmY6SW1hZ2VXaWR0aD0iMiIKICAgdGlmZjpJbWFnZUxlbmd0aD0iMiIKICAgdGlmZjpSZXNvbHV0aW9uVW5pdD0iMiIKICAgdGlmZjpYUmVzb2x1dGlvbj0iNzIuMCIKICAgdGlmZjpZUmVzb2x1dGlvbj0iNzIuMCIKICAgcGhvdG9zaG9wOkNvbG9yTW9kZT0iMyIKICAgcGhvdG9zaG9wOklDQ1Byb2ZpbGU9InNSR0IgSUVDNjE5NjYtMi4xIgogICB4bXA6TW9kaWZ5RGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIKICAgeG1wOk1ldGFkYXRhRGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCI+CiAgIDx4bXBNTTpIaXN0b3J5PgogICAgPHJkZjpTZXE+CiAgICAgPHJkZjpsaQogICAgICBzdEV2dDphY3Rpb249InByb2R1Y2VkIgogICAgICBzdEV2dDpzb2Z0d2FyZUFnZW50PSJBZmZpbml0eSBQaG90byAxLjguMyIKICAgICAgc3RFdnQ6d2hlbj0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIvPgogICAgPC9yZGY6U2VxPgogICA8L3htcE1NOkhpc3Rvcnk+CiAgPC9yZGY6RGVzY3JpcHRpb24+CiA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgo8P3hwYWNrZXQgZW5kPSJyIj8+IC4TuwAAAYRpQ0NQc1JHQiBJRUM2MTk2Ni0yLjEAACiRdZE7SwNBFEaPiRrxQQQFLSyCRiuVGEG0sUjwBWqRRPDVbDYvIYnLboIEW8E2oCDa+Cr0F2grWAuCoghiZWGtaKOy3k2EBIkzzL2Hb+ZeZr4BWyippoxqD6TSGT0w4XPNLyy6HM/UYqONfroU1dBmguMh/h0fd1RZ+abP6vX/uYqjIRI1VKiqEx5VNT0jPCk8vZbRLN4WblUTSkT4VLhXlwsK31p6uMgvFseL/GWxHgr4wdYs7IqXcbiM1YSeEpaX404ls+rvfayXNEbTc0HJnbI6MAgwgQ8XU4zhZ4gBRiQO0YdXHBoQ7yrXewr1s6xKrSpRI4fOCnESZOgVNSvdo5JjokdlJslZ/v/11YgNeovdG31Q82Sab93g2ILvvGl+Hprm9xHYH+EiXapfPYDhd9HzJc29D84NOLssaeEdON+E9gdN0ZWCZJdli8Xg9QSaFqDlGuqXip797nN8D6F1+aor2N2DHjnvXP4Bhcln9Ef7rWMAAAAJcEhZcwAACxMAAAsTAQCanBgAAAAXSURBVAiZY7hw4cL///8Z////f/HiRQBMEQrfQiLDpgAAAABJRU5ErkJggg=='); background-size: 25px; background-repeat: repeat; image-rendering: pixelated;" src="${state.localEndpointURL}graph/?access_token=${state.endpointSecret}" data-fullscreen="false"
+	<iframe id="preview_frame" style="width: 100%; height: 100%; position: relative; z-index: 1; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAEq2lUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4KPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNS41LjAiPgogPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgeG1sbnM6ZXhpZj0iaHR0cDovL25zLmFkb2JlLmNvbS9leGlmLzEuMC8iCiAgICB4bWxuczp0aWZmPSJodHRwOi8vbnMuYWRvYmUuY29tL3RpZmYvMS4wLyIKICAgIHhtbG5zOnBob3Rvc2hvcD0iaHR0cDovL25zLmFkb2JlLmNvbS9waG90b3Nob3AvMS4wLyIKICAgIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIKICAgIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIgogICAgeG1sbnM6c3RFdnQ9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZUV2ZW50IyIKICAgZXhpZjpQaXhlbFhEaW1lbnNpb249IjIiCiAgIGV4aWY6UGl4ZWxZRGltZW5zaW9uPSIyIgogICBleGlmOkNvbG9yU3BhY2U9IjEiCiAgIHRpZmY6SW1hZ2VXaWR0aD0iMiIKICAgdGlmZjpJbWFnZUxlbmd0aD0iMiIKICAgdGlmZjpSZXNvbHV0aW9uVW5pdD0iMiIKICAgdGlmZjpYUmVzb2x1dGlvbj0iNzIuMCIKICAgdGlmZjpZUmVzb2x1dGlvbj0iNzIuMCIKICAgcGhvdG9zaG9wOkNvbG9yTW9kZT0iMyIKICAgcGhvdG9zaG9wOklDQ1Byb2ZpbGU9InNSR0IgSUVDNjE5NjYtMi4xIgogICB4bXA6TW9kaWZ5RGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIKICAgeG1wOk1ldGFkYXRhRGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCI+CiAgIDx4bXBNTTpIaXN0b3J5PgogICAgPHJkZjpTZXE+CiAgICAgPHJkZjpsaQogICAgICBzdEV2dDphY3Rpb249InByb2R1Y2VkIgogICAgICBzdEV2dDpzb2Z0d2FyZUFnZW50PSJBZmZpbml0eSBQaG90byAxLjguMyIKICAgICAgc3RFdnQ6d2hlbj0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIvPgogICAgPC9yZGY6U2VxPgogICA8L3htcE1NOkhpc3Rvcnk+CiAgPC9yZGY6RGVzY3JpcHRpb24+CiA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgo8P3hwYWNrZXQgZW5kPSJyIj8+IC4TuwAAAYRpQ0NQc1JHQiBJRUM2MTk2Ni0yLjEAACiRdZE7SwNBFEaPiRrxQQQFLSyCRiuVGEG0sUjwBWqRRPDVbDYvIYnLboIEW8E2oCDa+Cr0F2grWAuCoghiZWGtaKOy3k2EBIkzzL2Hb+ZeZr4BWyippoxqD6TSGT0w4XPNLyy6HM/UYqONfroU1dBmguMh/h0fd1RZ+abP6vX/uYqjIRI1VKiqEx5VNT0jPCk8vZbRLN4WblUTSkT4VLhXlwsK31p6uMgvFseL/GWxHgr4wdYs7IqXcbiM1YSeEpaX404ls+rvfayXNEbTc0HJnbI6MAgwgQ8XU4zhZ4gBRiQO0YdXHBoQ7yrXewr1s6xKrSpRI4fOCnESZOgVNSvdo5JjokdlJslZ/v/11YgNeovdG31Q82Sab93g2ILvvGl+Hprm9xHYH+EiXapfPYDhd9HzJc29D84NOLssaeEdON+E9gdN0ZWCZJdli8Xg9QSaFqDlGuqXip797nN8D6F1+aor2N2DHjnvXP4Bhcln9Ef7rWMAAAAJcEhZcwAACxMAAAsTAQCanBgAAAAXSURBVAiZY7hw4cL///8Z////f/HiRQBMEQrfQiLDpgAAAABJRU5ErkJggg=='); background-size: 25px; background-repeat: repeat; image-rendering: pixelated;" src="${makeCallBackURL('graph/')}" data-fullscreen="false"
 		onload="(() =>{
 	})()""></iframe>
 </div>
@@ -8963,8 +8962,8 @@ Map getOptions_weather2(){
 			"tiles" :	(List)state.tile_settings,
 			"tile_type" : (Map)state.tile_type,
 			"new_tile_dialog" : state.newTileDialog,
-			"api_code" : "${state.endpointSecret}",
-			"url" :	"${state.localEndpointURL}",
+			"api_code" : getEndpointSecret(),
+			"url" :	getEndpointURL(),
 	]
 
 	options.out_units=[:]
@@ -9426,8 +9425,6 @@ void buildWeatherData(){
 	if(isEric())debug "buildWeatherData",null
 	//def selections=settings["tile_settings"]
 
-//	String tdata=parent.getOpenWeatherData() // TODO parent.getWData()
-//	Map data=parseJson(tdata)
 	Map data=parent.getWData()
 	//log.debug "buildWeatherData got ${data.size()}"
 
@@ -9576,14 +9573,14 @@ String defineHTML_Header(){
 
 	String html="""
 <!DOCTYPE html>
-	<link rel="stylesheet" href="//cdn.materialdesignicons.com/5.4.55/css/materialdesignicons.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/5.4.55/css/materialdesignicons.min.css">
 	<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
 	<link rel="stylesheet" href="https://code.getmdl.io/1.3.0/material.indigo-pink.min.css">
 	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
 	<link rel="stylesheet" href="/local/${isSystemType() ? 'webcore/' : ''}f06ea400-fe7a-49ef-8c50-6418f0a78dc6-WeatherTile2.css">
 	<script>
-		const localURL =		"${state.localEndpointURL}";
-		const secretEndpoint=	"${state.endpointSecret}";
+		const localURL =		"${getEndpointURL()}";
+		const secretEndpoint=	"${getEndpointSecret()}";
 		const latitude =		"${latitude}";
 		const longitude =		"${longitude}";
 		const tile_key =		"${tile_key}";
@@ -10731,11 +10728,11 @@ String defineHTML_Header_forecast(){
 <!DOCTYPE html>
 	<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
 	<link rel="stylesheet" href="https://code.getmdl.io/1.3.0/material.indigo-pink.min.css">
-	<link rel="stylesheet" href="//cdn.materialdesignicons.com/5.4.55/css/materialdesignicons.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/MaterialDesign-Webfont/5.4.55/css/materialdesignicons.min.css">
 
 	<script>
-		const localURL =		"${state.localEndpointURL}";
-		const secretEndpoint= "${state.endpointSecret}";
+		const localURL =		"${getEndpointURL()}";
+		const secretEndpoint=	"${getEndpointSecret()}";
 		const latitude =		"${latitude}";
 		const longitude =		"${longitude}";
 		const tile_key =		"${tile_key}";
@@ -13553,7 +13550,7 @@ String hubiForm_graph_preview(){
 		}
 	</style>
 	<div class="iframe-container">
-	<iframe id="preview_frame" style="width: 100%; height: 100%; position: relative; z-index: 1; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAEq2lUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4KPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNS41LjAiPgogPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgeG1sbnM6ZXhpZj0iaHR0cDovL25zLmFkb2JlLmNvbS9leGlmLzEuMC8iCiAgICB4bWxuczp0aWZmPSJodHRwOi8vbnMuYWRvYmUuY29tL3RpZmYvMS4wLyIKICAgIHhtbG5zOnBob3Rvc2hvcD0iaHR0cDovL25zLmFkb2JlLmNvbS9waG90b3Nob3AvMS4wLyIKICAgIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIKICAgIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIgogICAgeG1sbnM6c3RFdnQ9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZUV2ZW50IyIKICAgZXhpZjpQaXhlbFhEaW1lbnNpb249IjIiCiAgIGV4aWY6UGl4ZWxZRGltZW5zaW9uPSIyIgogICBleGlmOkNvbG9yU3BhY2U9IjEiCiAgIHRpZmY6SW1hZ2VXaWR0aD0iMiIKICAgdGlmZjpJbWFnZUxlbmd0aD0iMiIKICAgdGlmZjpSZXNvbHV0aW9uVW5pdD0iMiIKICAgdGlmZjpYUmVzb2x1dGlvbj0iNzIuMCIKICAgdGlmZjpZUmVzb2x1dGlvbj0iNzIuMCIKICAgcGhvdG9zaG9wOkNvbG9yTW9kZT0iMyIKICAgcGhvdG9zaG9wOklDQ1Byb2ZpbGU9InNSR0IgSUVDNjE5NjYtMi4xIgogICB4bXA6TW9kaWZ5RGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIKICAgeG1wOk1ldGFkYXRhRGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCI+CiAgIDx4bXBNTTpIaXN0b3J5PgogICAgPHJkZjpTZXE+CiAgICAgPHJkZjpsaQogICAgICBzdEV2dDphY3Rpb249InByb2R1Y2VkIgogICAgICBzdEV2dDpzb2Z0d2FyZUFnZW50PSJBZmZpbml0eSBQaG90byAxLjguMyIKICAgICAgc3RFdnQ6d2hlbj0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIvPgogICAgPC9yZGY6U2VxPgogICA8L3htcE1NOkhpc3Rvcnk+CiAgPC9yZGY6RGVzY3JpcHRpb24+CiA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgo8P3hwYWNrZXQgZW5kPSJyIj8+IC4TuwAAAYRpQ0NQc1JHQiBJRUM2MTk2Ni0yLjEAACiRdZE7SwNBFEaPiRrxQQQFLSyCRiuVGEG0sUjwBWqRRPDVbDYvIYnLboIEW8E2oCDa+Cr0F2grWAuCoghiZWGtaKOy3k2EBIkzzL2Hb+ZeZr4BWyippoxqD6TSGT0w4XPNLyy6HM/UYqONfroU1dBmguMh/h0fd1RZ+abP6vX/uYqjIRI1VKiqEx5VNT0jPCk8vZbRLN4WblUTSkT4VLhXlwsK31p6uMgvFseL/GWxHgr4wdYs7IqXcbiM1YSeEpaX404ls+rvfayXNEbTc0HJnbI6MAgwgQ8XU4zhZ4gBRiQO0YdXHBoQ7yrXewr1s6xKrSpRI4fOCnESZOgVNSvdo5JjokdlJslZ/v/11YgNeovdG31Q82Sab93g2ILvvGl+Hprm9xHYH+EiXapfPYDhd9HzJc29D84NOLssaeEdON+E9gdN0ZWCZJdli8Xg9QSaFqDlGuqXip797nN8D6F1+aor2N2DHjnvXP4Bhcln9Ef7rWMAAAAJcEhZcwAACxMAAAsTAQCanBgAAAAXSURBVAiZY7hw4cL///8Z////f/HiRQBMEQrfQiLDpgAAAABJRU5ErkJggg=='); background-size: 25px; background-repeat: repeat; image-rendering: pixelated;" src="${state.localEndpointURL}graph/?access_token=${state.endpointSecret}" data-fullscreen="false"
+	<iframe id="preview_frame" style="width: 100%; height: 100%; position: relative; z-index: 1; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAEq2lUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4KPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNS41LjAiPgogPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4KICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgeG1sbnM6ZXhpZj0iaHR0cDovL25zLmFkb2JlLmNvbS9leGlmLzEuMC8iCiAgICB4bWxuczp0aWZmPSJodHRwOi8vbnMuYWRvYmUuY29tL3RpZmYvMS4wLyIKICAgIHhtbG5zOnBob3Rvc2hvcD0iaHR0cDovL25zLmFkb2JlLmNvbS9waG90b3Nob3AvMS4wLyIKICAgIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIKICAgIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIgogICAgeG1sbnM6c3RFdnQ9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZUV2ZW50IyIKICAgZXhpZjpQaXhlbFhEaW1lbnNpb249IjIiCiAgIGV4aWY6UGl4ZWxZRGltZW5zaW9uPSIyIgogICBleGlmOkNvbG9yU3BhY2U9IjEiCiAgIHRpZmY6SW1hZ2VXaWR0aD0iMiIKICAgdGlmZjpJbWFnZUxlbmd0aD0iMiIKICAgdGlmZjpSZXNvbHV0aW9uVW5pdD0iMiIKICAgdGlmZjpYUmVzb2x1dGlvbj0iNzIuMCIKICAgdGlmZjpZUmVzb2x1dGlvbj0iNzIuMCIKICAgcGhvdG9zaG9wOkNvbG9yTW9kZT0iMyIKICAgcGhvdG9zaG9wOklDQ1Byb2ZpbGU9InNSR0IgSUVDNjE5NjYtMi4xIgogICB4bXA6TW9kaWZ5RGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIKICAgeG1wOk1ldGFkYXRhRGF0ZT0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCI+CiAgIDx4bXBNTTpIaXN0b3J5PgogICAgPHJkZjpTZXE+CiAgICAgPHJkZjpsaQogICAgICBzdEV2dDphY3Rpb249InByb2R1Y2VkIgogICAgICBzdEV2dDpzb2Z0d2FyZUFnZW50PSJBZmZpbml0eSBQaG90byAxLjguMyIKICAgICAgc3RFdnQ6d2hlbj0iMjAyMC0wNi0wMlQxOTo0NzowNS0wNDowMCIvPgogICAgPC9yZGY6U2VxPgogICA8L3htcE1NOkhpc3Rvcnk+CiAgPC9yZGY6RGVzY3JpcHRpb24+CiA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgo8P3hwYWNrZXQgZW5kPSJyIj8+IC4TuwAAAYRpQ0NQc1JHQiBJRUM2MTk2Ni0yLjEAACiRdZE7SwNBFEaPiRrxQQQFLSyCRiuVGEG0sUjwBWqRRPDVbDYvIYnLboIEW8E2oCDa+Cr0F2grWAuCoghiZWGtaKOy3k2EBIkzzL2Hb+ZeZr4BWyippoxqD6TSGT0w4XPNLyy6HM/UYqONfroU1dBmguMh/h0fd1RZ+abP6vX/uYqjIRI1VKiqEx5VNT0jPCk8vZbRLN4WblUTSkT4VLhXlwsK31p6uMgvFseL/GWxHgr4wdYs7IqXcbiM1YSeEpaX404ls+rvfayXNEbTc0HJnbI6MAgwgQ8XU4zhZ4gBRiQO0YdXHBoQ7yrXewr1s6xKrSpRI4fOCnESZOgVNSvdo5JjokdlJslZ/v/11YgNeovdG31Q82Sab93g2ILvvGl+Hprm9xHYH+EiXapfPYDhd9HzJc29D84NOLssaeEdON+E9gdN0ZWCZJdli8Xg9QSaFqDlGuqXip797nN8D6F1+aor2N2DHjnvXP4Bhcln9Ef7rWMAAAAJcEhZcwAACxMAAAsTAQCanBgAAAAXSURBVAiZY7hw4cL///8Z////f/HiRQBMEQrfQiLDpgAAAABJRU5ErkJggg=='); background-size: 25px; background-repeat: repeat; image-rendering: pixelated;" src="${makeCallBackURL('graph/')}" data-fullscreen="false"
 		onload="(() =>{
 	})()""></iframe>
 	</div>
@@ -13738,7 +13735,7 @@ void hubiTool_create_tile(){
 	}
 
 	//Send the html
-	String s= "${state.localEndpointURL}graph/?access_token=${state.endpointSecret}"
+	String s= "${makeCallBackURL('graph/')}"
 	childDevice.setGraph(s)
 	if(isDbg())debug "Sent setGraph: ${s}",null,iN2
 }
@@ -14550,6 +14547,19 @@ static String string2gzip(String s){
 	baos.close()
 	return result.encodeBase64()
 }
+
+private String makeCallBackURL(String path){
+	return "${getEndpointURL()}${path}?access_token=${getEndpointSecret()}".toString()
+}
+
+private String getEndpointURL(){
+	String ep; ep= "${state.localEndpointURL}".toString()
+	if(!ep.contains('https') && ep.contains('http:')){
+		ep= ep.replace('http:', 'https:')
+	}
+	return ep
+}
+private String getEndpointSecret(){ return "${state.endpointSecret}".toString() }
 
 private Long wnow(){ return (Long)now() }
 private Date wtoDateTime(String s){ return (Date)toDateTime(s) }
