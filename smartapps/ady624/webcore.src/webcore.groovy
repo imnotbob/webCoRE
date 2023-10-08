@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update September 28, 2023 for Hubitat
+ * Last update October 8, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -31,8 +31,8 @@
 //file:noinspection GrMethodMayBeStatic
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230828_HE'
-@Field static final String sHVERSTR='v0.3.114.20230828_HE - September 28, 2023'
+@Field static final String sHVER='v0.3.114.20231008_HE'
+@Field static final String sHVERSTR='v0.3.114.20231008_HE - October 8, 2023'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -4740,6 +4740,7 @@ static String span(String str,String clr=sNL,String sz=sNL,Boolean bld=false,Boo
 	powerMeter			: [ (sN): "Power Meter",			(sD): "power meters",				(sA): "power",											],
 	powerSource			: [ (sN): "Power Source",			(sD): "multisource powered devices",	(sA): "powerSource",										],
 	presenceSensor		: [ (sN): "Presence Sensor",		(sD): "presence sensors",			(sA): "presence",											],
+	pressureMeasurement	: [ (sN): "Pressure Measurement",	(sD): "pressure sensors",		(sA): "pressure",										],
 	pushableButton		: [ (sN): "Pushable Button",		(sD): "pushable buttons",			(sA): "pushed",		(sM): true,	(sC): ["push"], /* (sS): "numberOfButtons,numButtons", i: "buttonNumber",*/		],
 	refresh				: [ (sN): "Refresh",				(sD): "refreshable devices",					(sC): ["refresh"],								],
 	relativeHumidityMeasurement	: [ (sN): "Relative Humidity Measurement",	(sD): "humidity sensors",			(sA): "humidity",											],
@@ -4865,6 +4866,7 @@ Map getChildAttributes(){
 	power				: [ (sN): "power",				(sT): sDEC,		u: "W",									],
 	powerSource			: [ (sN): "power source",		(sT): sENUM,		(sO): ["battery", "dc", "mains", "unknown"],				],
 	presence			: [ (sN): "presence",			(sT): sENUM,		(sO): ["not present", "present"],						],
+	pressure			: [ (sN): "pressure",			(sT): sDEC,								],
 	rate				: [ (sN): "liquid flow rate",	(sT): sDEC,											],
 //	RGB					: [ (sN): "rgb",				(sT): sSTR,											],
 	rssi				: [ (sN): "signal strength",	(sT): sINT,	(sR): [iZ, i100],		u: "%",							],
@@ -4902,7 +4904,7 @@ Map getChildAttributes(){
 	touch				: [ (sN): "touch",				(sT): sENUM,		(sO): ["touched"],								],
 	trackData			: [ (sN): "track data",			(sT): "object",											],
 	trackDescription	: [ (sN): "track description",		(sT): sSTR,											],
-	ultravioletIndex	: [ (sN): "UV index",			(sT): sINT,		(sR): [iZ, null],									],
+	ultravioletIndex	: [ (sN): "UV index",			(sT): sDEC,		(sR): [iZ, null],									],
 	valve				: [ (sN): "valve",				(sT): sENUM,		(sO): [sCLOSED, sOPEN],							],
 //	variable			: [ (sN): "variable value",	(sT): sSTR,											],
 	voltage				: [ (sN): "voltage",			(sT): sDEC,		(sR): [null, null],	u: "V",							],

@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update September 28, 2023 for Hubitat
+ * Last update October 8, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230828_HE'
+@Field static final String sHVER='v0.3.114.20231008_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -2756,7 +2756,8 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		if(evntName in [sHSMALRT,sHSMRULE,sHSMRULES])
 			valStr+= ((evntName==sHSMALRT && evntVal==sRULE) || evntName in [sHSMRULE,sHSMRULES] ? sCOMMA+stripH(sMs(event,sDESCTXT)):sBLK)
 		String mymsg
-		mymsg='Received event ['+devStr+'].'+evntName+recStr+' = '+valStr+" with a delay of ${eventDelay}ms"
+		mymsg= !queue && callMySelf ? 'Working queued' : 'Received'
+		mymsg+=' event ['+devStr+'].'+evntName+recStr+' = '+valStr+" with a delay of ${eventDelay}ms"
 		if(lg>i1)mymsg+=", canQueue: ${queue}, calledMyself: ${callMySelf}"
 		mymsg=mymsg.toString()
 		info mymsg,tmpRtD,iZ
