@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update November 16, 2023 for Hubitat
+ * Last update November 21, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -4759,7 +4759,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 			Integer dyMon= zdt.getMonth().getValue()-i1
 			Integer dyDay= zdt.getDayOfWeek().getValue() % i7
 			Integer dyMonDay= zdt.getDayOfMonth()
-			if(lge) myDetail r9,mySt1+"dtime: $dtime rightNow: $rightNow  nxtSchd: $nxtSchd<br>lastDay: $lastDay thisDay: $thisDay<br>dyYear: $dyYear dyMon: $dyMon dyMonDay: $dyMonDay dyDay: $dyDay ZonedDate: $zdt",iN2
+			if(lge) myDetail r9,mySt1+"12 dtime: $dtime rightNow: $rightNow  nxtSchd: $nxtSchd lastDay: $lastDay thisDay: $thisDay dyYear: $dyYear dyMon: $dyMon dyMonDay: $dyMonDay dyDay: $dyDay ZonedDate: $zdt",iN2
 
 			//the repeating interval is not necessarily constant
 			switch(intervlUnit){
@@ -4831,29 +4831,27 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 						myDetail r9,mySt1+"odm: $odm odw: $odw omy: $omy day: $day month: $month year: $year",iN2
 					if(day){
 						nzdt= nzdt.withDayOfMonth(day)
-						Long t0,t1
-						t0=dtime
-						t1= nzdt.toInstant().toEpochMilli()
-						nxtSchd=addTime(r9,t0,t1-t0,level)
+						nxtSchd= nzdt.toInstant().toEpochMilli()
+						//if(lge) myDetail r9,mySt1+"14 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 					}
 					break
 			}
-			//if(lge) myDetail r9,mySt1+"12 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
+			//if(lge) myDetail r9,mySt1+"13 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 			// if we have a sunrise/sunset preset, we need to get the sunrise/sunset as of the day we are evaulating in the future
 			nxtSchd= hasPresetS && svNxtSchd!=nxtSchd ? evalPresetMap(r9,tlo2,tlo3,nxtSchd,lge) : nxtSchd
 		}
-		if(lge) myDetail r9,mySt1+"13 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
+		if(lge) myDetail r9,mySt1+"15 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 		//check to see if it fits the restrictions
 		if(nxtSchd>=rightNow){
-			if(lge)myDetail r9,mySt1+"checking for schedule restrictions for $tlo",iN2
 			Long offset=checkTimeRestrictions(r9,tlo,nxtSchd,level,interval)
+			if(lge)myDetail r9,mySt1+"checking for schedule restrictions for $tlo interval: $interval level: $level RESULT: $offset",iN2
 			if(offset==lZ){
 				if(lge)
 					myDetail r9,mySt1+"TIME RESTRICTION PASSED cycle: ${tcy-cycles} nxtSchd: $nxtSchd priorActivity: $priorActivity lastRun: $lastRun lastR: $lastR rightNow: $rightNow",iN2
 				break
 			}
 			if(offset>lZ){
-				if(lge) myDetail r9,mySt1+"offset: $offset",iN2
+				//if(lge) myDetail r9,mySt1+"offset: $offset level: $level",iN2
 				nxtSchd=addTime(r9,nxtSchd,offset,level)
 				nxtSchd= hasPresetS ? evalPresetMap(r9,tlo2,tlo3,nxtSchd,lge) : nxtSchd
 			}
@@ -13013,10 +13011,9 @@ private static List<Integer> hexToHsl(String hex){
 	mhex=hex!=sNL ? hex:sZ6
 	if(mhex.startsWith('#'))mhex=mhex.substring(i1)
 	if(mhex.size()!=i6)mhex=sZ6
-	Double d255=255.0D
-	Double r=Integer.parseInt(mhex.substring(iZ,i2),i16)/d255
-	Double g=Integer.parseInt(mhex.substring(i2,i4),i16)/d255
-	Double b=Integer.parseInt(mhex.substring(i4,i6),i16)/d255
+	Double r=Integer.parseInt(mhex.substring(iZ,i2),i16)/255.0D
+	Double g=Integer.parseInt(mhex.substring(i2,i4),i16)/255.0D
+	Double b=Integer.parseInt(mhex.substring(i4,i6),i16)/255.0D
 
 	Double max=Math.max(Math.max(r,g),b)
 	Double min=Math.min(Math.min(r,g),b)
