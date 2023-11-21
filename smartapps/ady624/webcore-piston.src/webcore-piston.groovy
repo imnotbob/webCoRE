@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update October 8, 2023 for Hubitat
+ * Last update November 16, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -127,9 +127,6 @@ static Boolean eric1(){ return false }
 
 @Field static final String sTRIG='trigger'
 @Field static final String sCONDITION='condition'
-@Field static final String sDLLRINDX='$index'
-@Field static final String sDLLRDEVS='$devices'
-@Field static final String sDLLRDEVICE='$device'
 
 @Field static final String sTIME='time'
 @Field static final String sPWRSRC='powerSource'
@@ -204,6 +201,34 @@ static Boolean eric1(){ return false }
 @Field static final String sAT='@'
 @Field static final String sAT2='@@'
 @Field static final String sDLR='$'
+
+// system variables
+@Field static final String sDARGS='$args'
+@Field static final String sDLLRDEVICE='$device'
+@Field static final String sDLLRDEVS='$devices'
+@Field static final String sDLLRINDX='$index'
+@Field static final String sDJSON='$json'
+@Field static final String sDRESP='$response'
+@Field static final String sLOCMODE='$locationMode'
+@Field static final String sLOC='$location'
+@Field static final String sNOW='$now'
+@Field static final String sLOCNOW='$localNow'
+@Field static final String sUTC='$utc'
+@Field static final String sPLACES='$places'
+@Field static final String sFILE='$file'
+@Field static final String sDLRWEAT='$weather'
+@Field static final String sDLRINCIDENTS='$incidents'
+@Field static final String sHSMTRIPPED='$hsmTripped'
+@Field static final String sFUEL='$fuel'
+@Field static final String sROOMS='$rooms'
+@Field static final String sROOMIDS='$roomids'
+
+@Field static final String sHTTPCNTN='$httpContentType'
+@Field static final String sHTTPCODE='$httpStatusCode'
+@Field static final String sHTTPOK='$httpStatusOk'
+@Field static final String sDLRHSMSTS='$hsmStatus'
+@Field static final String sIFTTTCODE='$iftttStatusCode'
+@Field static final String sIFTTTOK='$iftttStatusOk'
 @Field static final String sPEVDATE='$previousEventDate'
 @Field static final String sPEVDELAY='$previousEventDelay'
 @Field static final String sPEVDEV='$previousEventDevice'
@@ -222,6 +247,7 @@ static Boolean eric1(){ return false }
 @Field static final String sCURVALUE='$currentEventValue'
 @Field static final String sCURUNIT='$currentEventUnit'
 @Field static final String sCURPHYS='$currentEventDevicePhysical'
+
 @Field static final String sAPPJSON='application/json'
 @Field static final String sAPPFORM='application/x-www-form-urlencoded'
 @Field static final String sCHNK='chunk:'
@@ -324,6 +350,11 @@ static Boolean eric1(){ return false }
 @Field static final String sPAUSE='pause'
 @Field static final String sPAUSES='pauses'
 @Field static final String sRESUME='resume'
+@Field static final String sWEAT='weather'
+@Field static final String sMEDIADATA='mediaData'
+@Field static final String sMEDIATYPE='mediaType'
+@Field static final String sMEDIAID='mediaId'
+@Field static final String sMEDIAURL='mediaUrl'
 
 @Field static final String sLOCID='locationId'
 @Field static final String sUSELFUELS='useLocalFuelStreams'
@@ -331,11 +362,13 @@ static Boolean eric1(){ return false }
 @Field static final String sINCIDENTS='incidents'
 @Field static final String sLOGHE='logsToHE'
 @Field static final String sINSTID='instanceId'
+@Field static final String sREGION='region'
 @Field static final String sENABLED='enabled'
 @Field static final String sALLLOC='allLocations'
 @Field static final String sOLDLOC='oldLocations'
 @Field static final String sNACCTSID='newAcctSid'
 @Field static final String sHCOREVER='hcoreVersion'
+@Field static final String sLOGPE='logPExec'
 
 @Field static final String sOLD='old'
 @Field static final String sNEW='new'
@@ -432,15 +465,8 @@ static Boolean eric1(){ return false }
 @Field static final String sEXPECTING='Expecting '
 @Field static final String sSTOREM='storeMedia'
 @Field static final String sIFTTM='iftttMaker'
-@Field static final String sDARGS='$args'
-@Field static final String sDJSON='$json'
-@Field static final String sDRESP='$response'
 @Field static final String sEND='end'
-@Field static final String sHTTPCNTN='$httpContentType'
-@Field static final String sHTTPCODE='$httpStatusCode'
-@Field static final String sHTTPOK='$httpStatusOk'
-@Field static final String sIFTTTCODE='$iftttStatusCode'
-@Field static final String sIFTTTOK='$iftttStatusOk'
+
 @Field static final String sTSLF='theSerialLockFLD'
 //@Field static final String sTCL='cacheLock'
 @Field static final String sTGBL='theGlobal'
@@ -1730,12 +1756,14 @@ private void cleanCode(Map i,Boolean inMem){
 		}
 	}
 }
+
 @CompileStatic
 static Boolean fndEmptyOper(Map<String,Object> oper){
 	Integer sz=oper.size()
 	return sz==iZ || ( (sz==i2 || sz==i3) && sMt(oper)==sC && !oper[sD] && sMs(oper,sG)==sANY)
 }
 
+@CompileStatic
 private void checkLabel(Map r9=null){
 	Boolean act=isAct(r9)
 	Boolean dis=!isEnbl(r9)
@@ -2426,17 +2454,19 @@ private LinkedHashMap getParentCache(){
 		if(res==null){
 			Map t0=wgtPdata()
 			Map t1
+			String lpe= sLOGPE
+			String aid= 'accountId'
 			t1=[
-				coreVersion: sMs(t0,'sCv'),
+				('coreVersion'): sMs(t0,'sCv'),
 				(sHCOREVER): sMs(t0,'sHv'),
 				(sPWRSRC): sMs(t0,sPWRSRC),
-				('region'): sMs(t0,'region'),
+				(sREGION): sMs(t0,sREGION),
 				(sINSTID): sMs(t0,sINSTID),
 				(sSETTINGS): mMs(t0,'stsettings'),
 				(sENABLED): isEnbl(t0),
 				(sLIFX): mMs(t0,sLIFX),
-				('logPExec'): bIs(t0,'logPExec'),
-				accountId: sMs(t0,'accountId'),
+				(lpe): bIs(t0,lpe),
+				(aid): sMs(t0,aid),
 				(sNACCTSID): bIs(t0,sNACCTSID),
 				(sLOCID): sMs(t0,sLOCID),
 				(sOLDLOC): (List)t0[sOLDLOC],
@@ -2821,8 +2851,8 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	if(clrC||clrL||clrA){
 		updateLogs(tmpRtD)
 		Map nrtD; nrtD= null
-		if (clrL) nrtD= clear1(true, true, true, false, true)
-		else if (clrA) nrtD= clear1(true, true, true, true) // resets semaphore
+		if(clrL) nrtD= clear1(true, true, true, false, true)
+		else if(clrA) nrtD= clear1(true, true, true, true) // resets semaphore
 		else if(clrC){
 			Long lexec= lMs(gtState(),sLEXEC)
 			if(lexec==null || elapseT(lexec) > 3660000L) nrtD= clear1(true, false, false, false)
@@ -3061,7 +3091,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		}
 		finalizeEvent(r9,msg,success)
 
-		if(bIs(r9,'logPExec')) sendLEvt(r9)
+		if(bIs(r9,sLOGPE)) sendLEvt(r9)
 	}
 
 	String mSmaNm=sMs(r9,sSEMAN)
@@ -3145,7 +3175,7 @@ private void sendLEvt(Map r9){
 private static void fill_cleanData(){
 	if(cleanData.size()==iZ)
 		cleanData= [sALLDEVS, sDID3OR5, sPCACHE, sMEM, sBREAK, sPWRSRC, sOLDLOC, sINCIDENTS, sSEMADEL, sVARS,
-					sSTACCESS, sATHR, sBLD, sNWCACHE, 'mediaData', 'mediaType', 'mediaId', 'mediaUrl', 'weather',
+					sSTACCESS, sATHR, sBLD, sNWCACHE, sMEDIADATA, sMEDIATYPE, sMEDIAID, sMEDIAURL, sWEAT,
 					sLOGS, sTRC, sSYSVARS, sLOCALV, sPREVEVT, sJSON, sRESP,
 					sCACHE, sSTORE, sSETTINGS, sLOCMODEID, 'coreVersion', sHCOREVER, sCNCLATNS, sCNDTNSTC, sPSTNSTC, sFFT, sRUN,
 					sRESUMED, sTERM, sINSTID, sWUP, sSTMTL, sARGS, 'nfl', sTEMP]
@@ -4613,7 +4643,7 @@ private static void pcmd(device,String cmd,List nprms=[]){
 private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	Boolean lg=isDbg(r9)
 	Boolean lge=lg && isEric(r9)
-	String mySt,mySt1; mySt=sNL; mySt1= lg ? "scheduleTimer ": sNL
+	String mySt,mySt1; mySt=sNL; mySt1= lg ? 'scheduleTimer ': sNL
 	Integer iTD=stmtNum(timer)
 	Map tlo=mMs(timer,sLO)
 	Map tlo2=mMs(timer,sLO2)
@@ -4633,8 +4663,9 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	}
 	if(lge) myDetail r9,mySt1+mySt,i1
 	//complicated stuff follows
+	// interval, day, hour, etc
 	String tinterval="${oMv(mevaluateOperand(r9,tlo))}".toString()
-	Boolean exitOut,priorActivity
+	Boolean exitOut,priorActivity,hasPresetS
 	exitOut=false
 	Integer tintvl,level,cycles
 	tintvl=iZ
@@ -4650,7 +4681,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	String intervlUnit=sMvt(tlo)
 	level=iZ
 
-	Long delta,time,rightNow,nxtSchd
+	Long delta,dtime,rightNow,nxtSchd
 	delta=lZ
 	switch(intervlUnit){
 		case sMS: level=i1; delta=l1; break
@@ -4663,27 +4694,31 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 		case sY: level=i8; break
 	}
 	if(lge) myDetail r9,mySt1+"interval: $interval delta: $delta level: $level intervlUnit: $intervlUnit",iN2
-	time=lZ
-	if(delta==lZ){
-		//let's get the offset
-		time=longEvalExpr(r9,mevaluateOperand(r9,tlo2),sDTIME)
-		if(sMt(tlo2)!=sC){
-			Map offset=mevaluateOperand(r9,tlo3)
-			time+=longEvalExpr(r9,rtnMap1(offset))
+	dtime=lZ
+	priorActivity= lastRun!=lZ
+	hasPresetS= false
+	rightNow= wnow()
+	if(delta==lZ){ // [sD, sW, sN, sY]
+		hasPresetS= hasPreset(tlo2)
+		if(lge) myDetail r9,mySt1+"1 dtime: $dtime rightNow: $rightNow lastRun: $lastRun hasPreset: $hasPresetS",iN2
+		dtime= evalPresetMap(r9,tlo2,tlo3,rightNow,lge)
+		// using sunrise,sunset presets, make sure in the future, without dst offsets
+		if(hasPresetS){
+			Long ndtime
+			ndtime= priorActivity ? pushTimeAhead(r9,dtime,lastRun,false) : pushTimeAhead(r9,dtime,rightNow,false)
+			if(ndtime!=dtime)
+				if(lge) myDetail r9,mySt1+"2 dtime: $dtime rightNow: $rightNow lastRun: $lastRun",iN2
+				dtime= evalPresetMap(r9,tlo2,tlo3,ndtime,lge)
 		}
-		time=fixPresetSRSS(r9,tlo2,time)
+		//if(lge) myDetail r9,mySt1+"3 dtime: $dtime rightNow: $rightNow lastRun: $lastRun",iN2
+		if(!priorActivity) dtime=pushTimeAhead(r9,dtime,rightNow,!hasPresetS) // first run
+		if(lge) myDetail r9,mySt1+"4 dtime: $dtime rightNow: $rightNow lastRun: $lastRun",iN2
 
-		//result is sDTIME
-		if(lastRun==lZ) //first run, just adjust the time so in the future
-			time=pushTimeAhead(r9,time,wnow())
 	}else{
 		delta=Math.round(delta*interval*d1)
 		if(lge) myDetail r9,mySt1+"interval: $interval delta: $delta level: $level intervlUnit: $intervlUnit",iN2
 	}
 
-	priorActivity=lastRun!=lZ
-
-	rightNow=wnow()
 	Long lastR=priorActivity ? lastRun:rightNow
 	nxtSchd=lastR
 
@@ -4696,11 +4731,14 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	}
 
 	//next date
-	cycles=i100
+	cycles=i500
 	Integer tcy=cycles+i1
 	if(lge)
-		myDetail r9,mySt1+"cycle: ${tcy-cycles} delta: $delta nxtSchd: $nxtSchd priorActivity: $priorActivity lastRun: $lastRun lastR: $lastR rightNow: $rightNow",iN2
+		myDetail r9,mySt1+"cycle: ${tcy-cycles} dtime: $dtime delta: $delta nxtSchd: $nxtSchd priorActivity: $priorActivity lastRun: $lastRun lastR: $lastR rightNow: $rightNow",iN2
+	Double d7=7.0D
 	while(cycles!=iZ){
+		Long svNxtSchd= nxtSchd
+		if(lge) myDetail r9,mySt1+"10 svNxtSchd: $svNxtSchd rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 		if(delta!=lZ){ // anything of [sMS, sS, sM, sH]
 			if(nxtSchd<(rightNow-delta)){
 				//behind, catch up to where the next future occurrence
@@ -4710,26 +4748,26 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 			}
 			nxtSchd+=delta
 		}else{ // [sD, sW, sN, sY]
-			if(lge) myDetail r9,mySt1+"time: $time rightNow: $rightNow",iN2
+			//if(lge) myDetail r9,mySt1+"11 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 			//advance ahead of rightNow if in the past
-			time=pushTimeAhead(r9,time,rightNow)
+			dtime=pushTimeAhead(r9,dtime,rightNow,!hasPresetS)
 			Long lastDay=Math.floor((nxtSchd/dMSDAY).toDouble()).toLong()
-			Long thisDay=Math.floor((time/dMSDAY).toDouble()).toLong()
-			if(lge) myDetail r9,mySt1+"time: $time rightNow: $rightNow lastDay: $lastDay thisDay: $thisDay",iN2
+			Long thisDay=Math.floor((dtime/dMSDAY).toDouble()).toLong()
 
-			ZonedDateTime zdt,nzdt; zdt = localDate(r9,time)
+			ZonedDateTime zdt,nzdt; zdt = localDate(r9,dtime)
 			Integer dyYear= zdt.getYear() - 1900
 			Integer dyMon= zdt.getMonth().getValue()-i1
 			Integer dyDay= zdt.getDayOfWeek().getValue() % i7
-			if(lge) myDetail r9,mySt1+"dyYear: $dyYear dyMon: $dyMon dyDay: $dyDay ZonedDate: $zdt",iN2
+			Integer dyMonDay= zdt.getDayOfMonth()
+			if(lge) myDetail r9,mySt1+"dtime: $dtime rightNow: $rightNow  nxtSchd: $nxtSchd<br>lastDay: $lastDay thisDay: $thisDay<br>dyYear: $dyYear dyMon: $dyMon dyMonDay: $dyMonDay dyDay: $dyDay ZonedDate: $zdt",iN2
 
 			//the repeating interval is not necessarily constant
 			switch(intervlUnit){
 				case sD:
 					if(priorActivity){
 						//add the required number of days
-						nxtSchd=addTime(r9,time,Math.round(dMSDAY*(interval-(thisDay-lastDay))),level)
-					}else nxtSchd=time
+						nxtSchd=addTime(r9,dtime,Math.round(dMSDAY*(interval-(thisDay-lastDay))),level)
+					}else nxtSchd=dtime
 					break
 				case sW:
 					//figure out the first day of the week matching the requirement
@@ -4738,7 +4776,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 					if(lge) myDetail r9,mySt1+"currentDay: $currentDay requiredDay: $requiredDay ",iN2
 					if(currentDay>requiredDay)requiredDay+=i7
 					//move to first matching day in future
-					nxtSchd=addTime(r9,time,Math.round(dMSDAY*(requiredDay-currentDay)),level) // this is ahead of now on proper day (could be today)
+					nxtSchd=addTime(r9,dtime,Math.round(dMSDAY*(requiredDay-currentDay)),level) // this is ahead of now on proper day (could be today)
 					Integer myInterval; myInterval=interval
 					if(requiredDay!=currentDay) myInterval-=i1 //if we changed the day adjust interval calculation
 					if(priorActivity)nxtSchd=addTime(r9,nxtSchd,Math.round(604800000.0D*myInterval),level) // this is n weeks from now
@@ -4771,7 +4809,6 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 						}
 					}else{
 						Integer iodw=icast(r9,odw)
-						Double d7=7.0D
 						//locate the nth week day of the month
 						if(odm>iZ){
 							//going forward
@@ -4795,13 +4832,17 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 					if(day){
 						nzdt= nzdt.withDayOfMonth(day)
 						Long t0,t1
-						t0=time
+						t0=dtime
 						t1= nzdt.toInstant().toEpochMilli()
 						nxtSchd=addTime(r9,t0,t1-t0,level)
 					}
 					break
 			}
+			//if(lge) myDetail r9,mySt1+"12 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
+			// if we have a sunrise/sunset preset, we need to get the sunrise/sunset as of the day we are evaulating in the future
+			nxtSchd= hasPresetS && svNxtSchd!=nxtSchd ? evalPresetMap(r9,tlo2,tlo3,nxtSchd,lge) : nxtSchd
 		}
+		if(lge) myDetail r9,mySt1+"13 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 		//check to see if it fits the restrictions
 		if(nxtSchd>=rightNow){
 			if(lge)myDetail r9,mySt1+"checking for schedule restrictions for $tlo",iN2
@@ -4811,10 +4852,13 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 					myDetail r9,mySt1+"TIME RESTRICTION PASSED cycle: ${tcy-cycles} nxtSchd: $nxtSchd priorActivity: $priorActivity lastRun: $lastRun lastR: $lastR rightNow: $rightNow",iN2
 				break
 			}
-			if(offset>lZ)nxtSchd=addTime(r9,nxtSchd,offset,level)
-			if(lge) myDetail r9,mySt1+"offset: $offset",iN2
+			if(offset>lZ){
+				if(lge) myDetail r9,mySt1+"offset: $offset",iN2
+				nxtSchd=addTime(r9,nxtSchd,offset,level)
+				nxtSchd= hasPresetS ? evalPresetMap(r9,tlo2,tlo3,nxtSchd,lge) : nxtSchd
+			}
 		}
-		time=nxtSchd
+		dtime=nxtSchd
 		priorActivity=true
 		cycles-=i1
 		if(lge)
@@ -4823,32 +4867,33 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 
 	if(nxtSchd>lastR){
 		liMs(r9,sSCHS).removeAll{ Map it -> iMsS(it)==iTD }
-		String msg= lg ? mySt1+"Requesting every schedule":sNL
+		String msg= lg ? mySt1+'Requesting ' + (cycles==iZ && lg ? 'interim ' : sBLK) +'every schedule':sNL
 		requestWakeUp(r9,timer,[(sDLR):iN1],nxtSchd,sNL,false,sNL,msg)
 	}
 	if(lge)myDetail r9,mySt1+mySt
 }
 
+@CompileStatic
+Long evalPresetMap(Map r9, Map oper,Map operoffset,Long dayBasis,Boolean lge=false){
+	String mySt,mySt1; mySt=sNL; mySt1= lge ? 'evalPresetMap ': sNL
+	if(lge) mySt="oper: ${oper} operoffset:${operoffset} dayBasis: ${dayBasis} "
+	if(lge) myDetail r9,mySt1+mySt,i1
+	Long dtime
+	//let's get the at time and offset
+	dtime= longEvalExpr(r9,mevaluateOperand(r9,oper,null,false,false,dayBasis),sDTIME)-getMidnightTime(r9)+getMidnightTime(r9,dayBasis)
+	if(sMt(oper)!=sC){
+		Map offset=mevaluateOperand(r9,operoffset)
+		dtime+=longEvalExpr(r9,rtnMap1(offset))
+	}
+	if(lge)myDetail r9,mySt1+mySt+"result: $dtime"
+	return dtime
+}
+
 /**
- * fix preset sunrise or sunset time for future calculations due to DST changes
+ * return true if operand has sunrise or sunset
  */
 @CompileStatic
-private Long fixPresetSRSS(Map r9,Map oper,Long itime){
-	Long time; time=itime
-	if(sMt(oper)==sS && sMs(oper,sS) in [sSUNSET, sSUNRISE]){
-		TimeZone mtz=rTZ(r9)
-		Long t=wnow()
-		Boolean timeOk= time>getMidnightTime(mtz) && time<getNextMidnightTime(mtz) && t<time
-		time= timeOk ? time :
-				Math.round(
-					(time+ (
-						mtz.getOffset(wtimeToday('03:00',mtz).getTime())
-							-mtz.getOffset(wtimeTodayAfter('23:59','03:00',mtz).getTime())
-					)
-				) *d1)
-	}
-	return time
-}
+static Boolean hasPreset(Map oper){ return (oper && sMt(oper)==sS && sMs(oper,sS) in [sSUNSET, sSUNRISE]) }
 
 /**
  * Add time (mod DST)
@@ -4866,16 +4911,32 @@ private static Long addTime(Map r9,Long pastTime,Long add,Integer level){
  * Push pastTime head by 24 hours (mod DST) until >=curTime
  */
 @CompileStatic
-private static Long pushTimeAhead(Map r9,Long pastTime,Long curTime){
+private static Long pushTimeAhead(Map r9,Long pastTime,Long curTime, Boolean dst=true){
 	Long retTime,t0,t1
 	retTime=pastTime
 	TimeZone mtz=rTZ(r9)
 	while(retTime<curTime){
 		t0=Math.round(retTime+dMSDAY)
-		t1=Math.round( (t0+(mtz.getOffset(retTime)-mtz.getOffset(t0))) *d1)
+		t1= dst ? Math.round( (t0+(mtz.getOffset(retTime)-mtz.getOffset(t0))) *d1) : t0
 		retTime=t1
 	}
 	return retTime
+}
+
+@CompileStatic
+Long evalRO1(Map r9,Map ro,Long now,Long t,Map tv1){
+	return	(longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,false,t),sDTIME)-getMidnightTime(r9,now)+getMidnightTime(r9,t)
+			+ (tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ) )
+}
+
+@CompileStatic
+Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long now,Long mnt,Map tv2,Map cLO){
+	return trigger ? v1:
+		( pCnt>i1 ? ( longEvalExpr(r9,mevaluateOperand(r9,ro2,null,false,true,v2),sDTIME)-getMidnightTime(r9,now)+getMidnightTime(r9,v2)
+						+ (tv2!=null ? longEvalExpr(r9,rtnMap1(tv2)) :lZ)
+					)
+				: sMv(cLO)==sTIME ? mnt:v1
+		)
 }
 
 @CompileStatic
@@ -4910,22 +4971,28 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 	Long v1,v2,n,n1
 	Map tv1,tv2
 	Map ro,ro2
-	ro=mMs(cndtn,sRO)
-	tv1=ro!=null && sMt(ro)!=sC ? mevaluateOperand(r9,mMs(cndtn,sTO)):null
-	v1=longEvalExpr(r9,mevaluateOperand(r9,ro),sDTIME) + (tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ)
 
-	v1=fixPresetSRSS(r9,ro,v1)
+	Long now= wnow()
+	ro=mMs(cndtn,sRO)
+	tv1=ro!=null && sMt(ro)!=sC ? mevaluateOperand(r9,mMs(cndtn,sTO)):null // offset1
+	Boolean roHasPreset= hasPreset(ro)
+	v1= evalRO1(r9,ro,now,now,tv1)
 
 	ro2=mMs(cndtn,sRO2)
-	tv2=ro2!=null && sMt(ro2)!=sC && pCnt>i1 ? mevaluateOperand(r9,mMs(cndtn,sTO2)):null
-	v2=trigger ? v1:(pCnt>i1 ? (longEvalExpr(r9,mevaluateOperand(r9,ro2,null,false,true),sDTIME) + (tv2!=null ? longEvalExpr(r9,rtnMap1(tv2)) :lZ)) : sMv(cLO)==sTIME ? getMidnightTime(rTZ(r9)):v1 )
+	tv2=ro2!=null && sMt(ro2)!=sC && pCnt>i1 ? mevaluateOperand(r9,mMs(cndtn,sTO2)):null // offset2
+	Boolean ro2HasPreset= hasPreset(ro2)
+	v2= evalRO2(r9,trigger,pCnt,v1,now,ro2,now,getMidnightTime(r9,now),tv2,cLO)
 
-	v2=!trigger && pCnt>i1 ? fixPresetSRSS(r9,ro2,v2) : v2
-
-	n=Math.round(d1*wnow()+2000L)
+	n=Math.round(d1*now+2000L)
 	if(sMv(cLO)==sTIME){
-		v1=pushTimeAhead(r9,v1,n)
-		v2=pushTimeAhead(r9,v2,n)
+		Long tempv; tempv= v1
+		v1=pushTimeAhead(r9,v1,n,!roHasPreset)
+		if(roHasPreset && tempv!=v1)
+			v1= evalRO1(r9,ro,now,v1,tv1)
+		tempv= v2
+		v2=pushTimeAhead(r9,v2,n,!ro2HasPreset)
+		if(ro2HasPreset && tempv!=v2)
+			v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,now,v2,tv2,cLO)
 	}
 
 	//figure out the next time
@@ -4933,19 +5000,39 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 	v2=v2<n ? v1:v2
 	n=v1<v2 ? v1:v2
 
+	Long origN=n
 	n1=n
 	if(sMv(cLO)==sTIME && trigger){
 		Integer iyr=1461 // 4 years
 		Integer v; v=iyr
 		if(lge)warn mySt+" checking for schedule restrictions for $cLO",r9
+		Long n2
 		while(v>iZ){
 			//repeat until we find a day that's matching the restrictions
 			if(checkTimeRestrictions(r9,cLO,n1,i5,i1)==lZ) break
+			// deal with sunrise sunset future calculations
+			if(roHasPreset || ro2HasPreset){
+				n=Math.round(d1*n1+2000L)
+
+				Long tempv; tempv= v1
+				v1=pushTimeAhead(r9,v1,n,!roHasPreset)
+				if(roHasPreset && tempv!=v1)
+					v1= evalRO1(r9,ro,now,v1,tv1)
+				tempv= v2
+				v2=pushTimeAhead(r9,v2,n,!ro2HasPreset)
+				if(ro2HasPreset && tempv!=v2)
+					v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,now,v2,tv2,cLO)
+				//figure out the next time
+				v1=v1<n ? v2:v1
+				v2=v2<n ? v1:v2
+				n2=v1<v2 ? v1:v2
+				n1= n2
+			}else
+				n1=pushTimeAhead(r9,n1,n1+l1)
 			v-=i1
-			n1=pushTimeAhead(r9,n1,n1+l1)
 		}
-		if(lg && v!=iyr)debug "Adding ${iyr-v} days, $n >>> $n1" ,r9
-		if(v==iZ)n1=n
+		if(lg && v!=iyr)debug "Adding ${iyr-v} days, $origN >>> $n1" ,r9
+		if(v==iZ)n1=origN
 	}
 
 	if(n1>wnow()){
@@ -5110,11 +5197,9 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 	return lZ
 }
 
+/** return r if r>0, otherwise -1 */
 @CompileStatic
-private static Long pRes(Long r){
-	Long res= r>lZ ? r: -l1
-	return res
-}
+private static Long pRes(Long r){ return r>lZ ? r: -l1 }
 
 /**
  * return the number of occurrences of same day of week up until the date or from the end of the month if backwards,i.e. last Sunday is -1, second-last Sunday is -2
@@ -6145,7 +6230,7 @@ private Long do_lifx(Map r9,String cmd,String path,Map body,Long duration,String
 	]
 	try{
 		if(isDbg(r9))debug "Sending lifx ${c} web request to: $path",r9
-		(void)"asynchttp${cmd}"('ahttpRequestHandler',requestParams,[command:sLIFX,em: [(sT):c]])
+		callHttp("asynchttp${cmd}".toString(),'ahttpRequestHandler',requestParams,[command:sLIFX,em: [(sT):c]])
 		Long ldur=duration ? Math.round(duration * d1000):lZ
 		Long l=11000L
 		return ldur>l ? ldur:l
@@ -6423,8 +6508,8 @@ void ahttpRequestHandler(resp,Map callbackData){
 							}
 						}else{
 							if(resp.data!=null && resp.data instanceof java.io.ByteArrayInputStream){
-								setRtData.mediaType=mediaType
-								setRtData.mediaData=resp.data.decodeBase64() // HE binary data is b64encoded resp.data.getBytes()
+								setRtData[sMEDIATYPE]=mediaType
+								setRtData[sMEDIADATA]=((String)resp.data).decodeBase64() // HE binary data is b64encoded resp.data.getBytes()
 							}
 						}
 					}else erMsg= 'http error'+erMsg
@@ -6464,7 +6549,7 @@ void ahttpRequestHandler(resp,Map callbackData){
 				}else if(sMs(data,'message')) erMsg="storeMedia Error storing media item: $data.message"+erMsg
 				data=null
 			}else erMsg='storeMedia'+erMsg
-			setRtData=[mediaId:mediaId,mediaUrl:mediaUrl]
+			setRtData=[(sMEDIAID):mediaId,(sMEDIAURL):mediaUrl]
 	}
 	if(erMsg!=sNL) error erMsg,null
 
@@ -6815,7 +6900,7 @@ private Long vcmd_writeToFuelStream(Map r9,device,List prms){
 	if(bIs(r9,sUSELFUELS) && name!=sNL) parent.writeToFuelStream(req)
 	else{
 		Map requestParams=[
-			uri: "https://api-"+sMs(r9,'region')+'-'+sMs(r9,sINSTID)[i32]+".webcore.co:9247",
+			uri: "https://api-"+sMs(r9,sREGION)+'-'+sMs(r9,sINSTID)[i32]+".webcore.co:9247",
 			path: "/fuelStream/write",
 			headers: ['ST': sMs(r9,sINSTID)],
 			body: req,
@@ -6833,20 +6918,20 @@ void asyncFuel(response,data){
 }
 
 private Long vcmd_storeMedia(Map r9,device,List prms){
-	if(!r9.mediaData || !r9.mediaType || (Integer)r9.mediaData.size()<=iZ){
+	if(!r9[sMEDIADATA] || !r9[sMEDIATYPE] || ((byte[])r9[sMEDIADATA]).size()<=iZ){
 		error 'No media is available to store; operation aborted.',r9
 		return lZ
 	}
-	String data=new String(r9.mediaData as byte[],'ISO_8859_1')
+	String data=new String((byte[])r9[sMEDIADATA],'ISO_8859_1')
 	Map requestParams=[
-		uri: "https://api-"+sMs(r9,'region')+'-'+sMs(r9,sINSTID)[i32]+".webcore.co:9247",
+		uri: "https://api-"+sMs(r9,sREGION)+'-'+sMs(r9,sINSTID)[i32]+".webcore.co:9247",
 		path: "/media/store",
 		headers: [
 			'ST':sMs(r9,sINSTID),
-			'media-type':r9.mediaType
+			'media-type': sMs(r9,sMEDIATYPE)
 		],
 		body: data,
-		requestContentType: r9.mediaType,
+		requestContentType: sMs(r9,sMEDIATYPE),
 		timeout:i20
 	]
 	asynchttpPut('asyncRequestHandler',requestParams,[command:sSTOREM])
@@ -7032,6 +7117,7 @@ private static String sffwdng(Map r9){ return prun(r9) ? sBLK : sFF+sTRUE+": ${c
 
 @Field static final String sFLWBY='followed by'
 @Field static final String sC_COL='c:'
+
 @CompileStatic
 private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean async){
 	String myS; myS=sBLK
@@ -7192,16 +7278,16 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 
 @CompileStatic
 private List levaluateOperand(Map r9,Map node, Map oper,Integer index=null,Boolean trigger=false,Boolean nextMidnight=false){
-	return (List)evaluateOperand(r9,node,oper,index,trigger,nextMidnight)
+	return (List)evaluateOperand(r9,node,oper,index,trigger,nextMidnight,null)
 }
 
 @CompileStatic
-private Map mevaluateOperand(Map r9,Map oper,Integer index=null,Boolean trigger=false,Boolean nextMidnight=false){
-	return (Map)evaluateOperand(r9,null,oper,index,trigger,nextMidnight)
+private Map mevaluateOperand(Map r9,Map oper,Integer index=null,Boolean trigger=false,Boolean nextMidnight=false,Long dayBasis=null){
+	return (Map)evaluateOperand(r9,null,oper,index,trigger,nextMidnight,dayBasis)
 }
 
 @CompileStatic
-private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trigger=false,Boolean nextMidnight=false){
+private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trigger=false,Boolean nextMidnight=false,Long dayBasis=null){
 	String myS,nodeI
 	myS=sBLK
 	Boolean lge=isEric(r9)
@@ -7305,12 +7391,11 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 				case sTIME:
 				case sDTIME:
 					Long v; v=lZ
-					TimeZone mtz=rTZ(r9)
 					switch(sMs(operand,sS)){
-						case sSUNSET: v=getSunsetTime(r9); break
-						case sSUNRISE: v=getSunriseTime(r9); break
-						case 'midnight': v=nextMidnight ? getNextMidnightTime(mtz):getMidnightTime(mtz); break
-						case 'noon': v=getNoonTime(mtz); break
+						case sSUNSET: v= getSunsetTime(r9,dayBasis); break
+						case sSUNRISE: v= getSunriseTime(r9, dayBasis); break
+						case 'midnight': v=nextMidnight ? getNextMidnightTime(r9,dayBasis):getMidnightTime(r9,dayBasis); break
+						case 'noon': v=getNoonTime(r9,dayBasis); break
 					}
 					if(ovt==sTIME && v)v=(Long)cast(r9,v,ovt,sDTIME)
 					mv=rtnMap(ovt,v)
@@ -9580,7 +9665,7 @@ private Map<String,Object> getPlaces(Map r9,String name){ return getJsonData(r9,
 private Map<String,Object> getResponse(Map r9,String name){ return getJsonData(r9,r9[sRESP],name) }
 
 private Map<String,Object> getWeather(Map r9,String name){
-	String s='weather'
+	String s=sWEAT
 	if(r9[s]==null){
 		Map t0=wgetWData()
 		r9[s]=t0!=null ? t0:[:]
@@ -9739,23 +9824,23 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 				res=getResponse(r9,tn.substring(i10))
 			}else if(tn.startsWith(sDRESP+sLB) && t0>i10){
 				res=getResponse(r9,tn.substring(i9))
-			}else if(tn.startsWith('$weather.') && t0>i9){
+			}else if(tn.startsWith(sDLRWEAT+sDOT) && t0>i9){
 				res=getWeather(r9,tn.substring(i9))
-			}else if(tn.startsWith('$rooms.') && t0>i7){
+			}else if(tn.startsWith(sROOMS+sDOT) && t0>i7){
 				res=getRooms(r9,tn.substring(i7))
 			}else if(tn.startsWith(sDJSON+sDOT) && t0>i6){
 				res=getJson(r9,tn.substring(i6))
 			}else if(tn.startsWith(sDJSON+sLB) && t0>i6){
 				res=getJson(r9,tn.substring(i5))
-			}else if(tn.startsWith('$incidents.') && t0>i11){
+			}else if(tn.startsWith(sDLRINCIDENTS+sDOT) && t0>i11){
 				res=getIncidents(r9,tn.substring(i11))
-			}else if(tn.startsWith('$incidents[') && t0>i11){
+			}else if(tn.startsWith(sDLRINCIDENTS+sLB) && t0>i11){
 				res=getIncidents(r9,tn.substring(i10))
-			}else if(tn.startsWith('$nfl.') && t0>i5){
+			}else if(tn.startsWith('$nfl'+sDOT) && t0>i5){
 				res=getNFL(r9,tn.substring(i5))
-			}else if(tn.startsWith('$places.') && t0>i8){
+			}else if(tn.startsWith(sPLACES+sDOT) && t0>i8){
 				res=getPlaces(r9,tn.substring(i8))
-			}else if(tn.startsWith('$places[') && t0>i8){
+			}else if(tn.startsWith(sPLACES+sLB) && t0>i8){
 				res=getPlaces(r9,tn.substring(i7))
 			}else{
 				def tres=r9[sSYSVARS][tn]
@@ -12337,7 +12422,7 @@ private static String encodeURIComponent(value){
 @CompileStatic
 private Long gtWCTimeToday(Map r9,Long time){
 	TimeZone tz= rTZ(r9)
-	Long t0=getMidnightTime(tz)
+	Long t0=getMidnightTime(r9)
 	Long res=time+t0
 	//we need to adjust for time overlapping during DST changes
 	return Math.round( (res+(tz.getOffset(t0)-tz.getOffset(res)) ) *d1)
@@ -12641,7 +12726,8 @@ private ZonedDateTime utcToLocalDate(Map r9,dateOrTimeOrString=null){
 }
 
 private ZonedDateTime localDate(Map r9, Long n=wnow()){
-	ZonedDateTime zdt = Instant.ofEpochMilli( n )
+	Long t; t= n ?: wnow()
+	ZonedDateTime zdt = Instant.ofEpochMilli(t)
 			.atZone( mZ(r9) )
 	return zdt
 }
@@ -12655,6 +12741,7 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 	Long res
 	res=lnull
 	Integer n; n=iZ
+	//SimpleDateFormat
 	def a=dateOrTimeOrString
 	try{
 		if("$a".isNumber()){
@@ -12820,6 +12907,8 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 	}
 	//if(eric1() && ((String)gtSetting(sLOGNG))?.toInteger()>i2)
 	//	log.warn "stringToTime n is $n"
+	//String sv= TZID(rTZ(r9))
+	//mTZ()
 	return res
 }
 
@@ -12924,9 +13013,10 @@ private static List<Integer> hexToHsl(String hex){
 	mhex=hex!=sNL ? hex:sZ6
 	if(mhex.startsWith('#'))mhex=mhex.substring(i1)
 	if(mhex.size()!=i6)mhex=sZ6
-	Double r=Integer.parseInt(mhex.substring(iZ,i2),i16)/255.0D
-	Double g=Integer.parseInt(mhex.substring(i2,i4),i16)/255.0D
-	Double b=Integer.parseInt(mhex.substring(i4,i6),i16)/255.0D
+	Double d255=255.0D
+	Double r=Integer.parseInt(mhex.substring(iZ,i2),i16)/d255
+	Double g=Integer.parseInt(mhex.substring(i2,i4),i16)/d255
+	Double b=Integer.parseInt(mhex.substring(i4,i6),i16)/d255
 
 	Double max=Math.max(Math.max(r,g),b)
 	Double min=Math.min(Math.min(r,g),b)
@@ -13156,8 +13246,6 @@ private void tracePoint(Map r9,String oId,Long duration,value){
 
 @Field static volatile Map<String,Map> svSunTFLD = [:]
 @Field static final String sNEXTM='nextM'
-@Field static final String sTRISE= 'todayssunrise'
-@Field static final String sTSET= 'todayssunset'
 @Field static final String sSUNT= 'sunTimes'
 
 /* wrappers */
@@ -13167,7 +13255,8 @@ private Map initSunrSunst(Map r9){
 	String k=TZID(mtz)
 
 	Map t0; t0=svSunTFLD[k]
-	Long t; t=wnow()
+	Long t=wnow()
+	Boolean ok; ok=true
 	//mTZ()
 	if(t0!=null){
 		if(t<lMs(t0,sNEXTM)){
@@ -13175,18 +13264,18 @@ private Map initSunrSunst(Map r9){
 		}else{ t0=null; svSunTFLD[k]=null; mb() }
 	}
 	if(t0==null){
-		Map sunTimes=app.getSunriseAndSunset()
+		Map sunTimes=app.getSunriseAndSunset([(sDATE):t])
 		if(sunTimes[sSUNRISE]==null){
 			warn 'Actual sunrise and sunset times are unavailable; please reset the location for your hub',r9
-			Long t1=getMidnightTime(mtz)
+			Long t1=getMidnightTime(r9)
 			sunTimes[sSUNRISE]=new Date(Math.round(t1+7.0D*dMSECHR))
 			sunTimes[sSUNSET]=new Date(Math.round(t1+19.0D*dMSECHR))
-			t=lZ
+			ok=false
 		}
 		Long a=((Date)sunTimes[sSUNRISE]).getTime()
 		Long b=((Date)sunTimes[sSUNSET]).getTime()
-		Long nmnght=getNextMidnightTime(mtz)
-		Long c,d,a1,b1
+		Long nmnght=getNextMidnightTime(r9)
+		Long c,d,a1,b1; c=d=a1=b1=(Long)null
 
 		Boolean good; good=true
 		try{
@@ -13205,58 +13294,21 @@ private Map initSunrSunst(Map r9){
 				c=((Date)getTomorrowsSunrise()).getTime()
 				d=((Date)getTomorrowsSunset()).getTime()
 			}
-			if(!a1){
-				a1= getMidnightTime(mtz)
-			}
-			if(!b1){
-				Long n,mar21,sep21,mid01
-				n=wnow()
-				String currYear = new Date().format('yyyy', mtz)
-				mar21= Date.parse('yyyy-MM-dd', currYear + '-03-21').getTime()
-				sep21= Date.parse('yyyy-MM-dd', currYear + '-09-21').getTime()
-				mid01= wtimeToday('00:00',mtz).getTime() + 1000L
-				Long twelve59= wtimeToday('23:59',mtz).getTime() + 59000L
-				Boolean isBtwn= (n >= mar21 && n < sep21)
-				if(gtLlat().toDouble() > dZ){
-					b1= isBtwn ? twelve59 : mid01
-				}else{
-					b1= !isBtwn ? twelve59 : mid01
-				}
-			}
-
 		}catch(ignored){
 			good=false
-			Boolean agtr=a>nmnght
-			Boolean bgtr=b>nmnght
-			Long srSkew=getSkew(a,'Sunrise')
-			Long ssSkew=getSkew(b,'Sunset')
-			a1=agtr ? Math.round(a-dMSDAY-srSkew):a
-			b1=bgtr ? Math.round(b-dMSDAY-ssSkew):b
-			c=agtr ? a:Math.round(a+dMSDAY+srSkew)
-			d=bgtr ? b:Math.round(b+dMSDAY+ssSkew)
 		}
-		Long dstoffset=Math.round(
-			( mtz.getOffset(wtimeToday('03:00',mtz).getTime())
-					-mtz.getOffset(wtimeTodayAfter('23:59','03:00',mtz).getTime())
-			) *d1)
-		Long c1=Math.round(c-dMSDAY)-dstoffset
-		Long db1=Math.round(d-dMSDAY)-dstoffset
 		t0=[
-			(sSUNRISE): a1,
-			(sSUNSET):b1,
-			(sTRISE): a1,
-			('calcsunrise'): (a>c1 ? a:c1),
-			(sTSET):b1,
-			('calcsunset'):(b>db1 ? b:db1),
-			('tomorrowssunrise'): c,
-			('tomorrowssunset'):d,
+			(sSUNRISE): a1?:a,
+			(sSUNSET): b1?:b,
+			('tomorrowssunrise'): c ?: pushTimeAhead(r9,a1?:a,nmnght,false),
+			('tomorrowssunset'): d ?: pushTimeAhead(r9,b1?:b,nmnght,false),
 			updated: t,
-			good: good,
+			good: ok&&good,
 			(sNEXTM): nmnght
 		]
-		if(!good) warn 'Please update HE firmware to improve time handling',r9
+		if(!good || !ok) warn 'Please update HE firmware to improve time handling',r9
 		r9[ty]=t0
-		if(t!=lZ){
+		if(ok&&good){
 			svSunTFLD[k]=t0; mb()
 			if(eric())debug "updating global sunrise ${t0}",null
 		}
@@ -13264,12 +13316,84 @@ private Map initSunrSunst(Map r9){
 	return mMs(r9,ty)
 }
 
-private Long getCalcSunriseTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'calcsunrise') }
-private Long getCalcSunsetTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'calcsunset') }
-private Long getSunriseTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,sTRISE) }
-private Long getSunsetTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,sTSET) }
 private Long getNextSunriseTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'tomorrowssunrise') }
 private Long getNextSunsetTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'tomorrowssunset') }
+private Long getSunriseTime(Map r9,Long dayBasis=null){
+	if(dayBasis){
+		return calcSunTime(r9,sSUNRISE,dayBasis)
+	}else{
+		Map st=initSunrSunst(r9); return lMs(st,sSUNRISE)
+	}
+}
+
+private Long getSunsetTime(Map r9,Long dayBasis=null){
+	if(dayBasis){
+		return calcSunTime(r9,sSUNSET,dayBasis)
+	}else{
+		Map st=initSunrSunst(r9); return lMs(st,sSUNSET)
+	}
+}
+
+Long calcSunTime(Map r9,String typ,Long time){
+	Long res
+	String m; m=sNL
+	ZonedDateTime zdt,nzdt
+	Long now= wnow()
+	Long t; t= time ?: now
+	zdt= localDate(r9,t)
+	// strip the time to midnight of the day in question
+	nzdt= zdt.withNano(iZ)
+	nzdt= nzdt.withSecond(iZ)
+	nzdt= nzdt.withMinute(iZ)
+	nzdt= nzdt.withHour(iZ)
+	Boolean sunset= typ==sSUNSET
+
+	ZonedDateTime nnzdt; nnzdt= localDate(r9,now)
+	if(zdt.getYear()==nnzdt.getYear() && zdt.getMonth().getValue()==nnzdt.getMonth().getValue() && zdt.getDayOfMonth()==nnzdt.getDayOfMonth()){
+		if(sunset)
+			res= getSunsetTime(r9)
+		else
+			res= getSunriseTime(r9)
+		m= 'getSun'
+	}else{
+		nnzdt= localDate(r9,now+Math.round(dMSDAY)) //+ 1 day
+		if(zdt.getYear()==nnzdt.getYear() && zdt.getMonth().getValue()==nnzdt.getMonth().getValue() && zdt.getDayOfMonth()==nnzdt.getDayOfMonth()){
+			if(sunset)
+				res = getNextSunsetTime(r9)
+			else
+				res = getNextSunriseTime(r9)
+			m = 'getNextSun'
+		}else{
+			try{
+				Date d= new Date(nzdt.toInstant().toEpochMilli())
+				Map sunTimes=app.getSunriseAndSunset([(sDATE):d]) // this only works for hub's location
+/*				Calendar calendar= Calendar.getInstance(rTZ(r9))
+				calendar.setTimeInMillis(nzdt.toInstant().toEpochMilli())
+				SolarTime solarTime= SolarTime.ofLocation(gtLlat().toDouble(), gtLlong().toDouble()) // this is only hub location
+				if(typ==sSUNSET)
+					res= solarTime.sunset(calendar)
+				else
+					res= solarTime.sunrise(calendar)
+*/
+				if(sunset)
+					res=((Date)sunTimes[sSUNSET]).getTime()
+				else
+					res=((Date)sunTimes[sSUNRISE]).getTime()
+				m= 'calculated'
+			}catch(ignore){
+				t=nzdt.toInstant().toEpochMilli()
+				if(sunset)
+					res= Math.round(t+19.0D*dMSECHR)
+				else
+					res= Math.round(t+7.0D*dMSECHR)
+				m= 'guessed'
+			}
+		}
+	}
+	if(isDbg(r9) && isEric(r9))
+		myDetail r9,"calcSunTime: ${m} result: $res ${formatLocalTime(r9,res)}",iN2
+	return res
+}
 
 private Boolean loadTZs(Map r9,String id){
 	try{
@@ -13320,33 +13444,35 @@ private static ZoneId loadZID(String zidS){
 	return  zid ?: myZone()
 }
 
-private Long getMidnightTime(TimeZone tz){ return wtimeToday('00:00',tz).getTime() }
-private Long getNextMidnightTime(TimeZone tz){ return wtimeTodayAfter('23:59','00:00',tz).getTime() }
-private Long getNoonTime(TimeZone tz){ return wtimeToday('12:00',tz).getTime() }
-private Long getNextNoonTime(TimeZone tz){ return wtimeTodayAfter('23:59','12:00',tz).getTime() }
-
-
-// trying to ensure to not fire sunsets or sunrises twice in same day by ensuring we fire a bit later than actual sunrise or sunset
-// tied to hub local area
-Long getSkew(Long t4,String ttyp){
-	Date t1=new Date(t4)
-	Integer curMon
-	curMon=t1.month
-	Double lat=gtLlat().toDouble()
-	curMon=lat>dZ ? curMon:((curMon+i6)%i12) // normalize for southern hemisphere
-	Integer day=t1.date
-
-	Integer addr
-	Boolean shorteningDays=(curMon==i5 && day>i20) || (curMon>i5 && !(curMon==i11 && day>i20))
-
-	if( (shorteningDays && ttyp=='Sunset') || (!shorteningDays && ttyp=='Sunrise') ) addr=i1000 // minimize skew when sunrise or sunset moving earlier in day
-	else{
-		Integer t2=Math.abs(lat).toInteger()
-		Integer t3=curMon%i6
-		Integer t5=Math.round(t3*(365.0D/12.0D)+day).toInteger() // days into period
-		addr=Math.round((t5>37 && t5<(182-37) ? t2*2.8D:t2*1.9D)*d1000).toInteger()
-	}
-	return addr.toLong()
+private Long getMidnightTime(Map r9,Long time=null){
+	ZonedDateTime zdt,nzdt
+	Long t; t= time ?: wnow()
+	zdt= localDate(r9,t)
+	// strip the time to midnight of the day in question
+	nzdt= zdt.withNano(iZ)
+	nzdt= nzdt.withSecond(iZ)
+	nzdt= nzdt.withMinute(iZ)
+	nzdt= nzdt.withHour(iZ)
+	return nzdt.toInstant().toEpochMilli()
+}
+private Long getNextMidnightTime(Map r9,Long time=null){
+	Long t= getMidnightTime(r9,time)
+	return pushTimeAhead(r9,t,t+1L)
+}
+private Long getNoonTime(Map r9,Long time=null){
+	ZonedDateTime zdt,nzdt
+	Long t; t= time ?: wnow()
+	zdt= localDate(r9,t)
+	// strip the time to noon of the day in question
+	nzdt= zdt.withNano(iZ)
+	nzdt= nzdt.withSecond(iZ)
+	nzdt= nzdt.withMinute(iZ)
+	nzdt= nzdt.withHour(12)
+	return nzdt.toInstant().toEpochMilli()
+}
+private Long getNextNoonTime(Map r9,Long time=null){
+	Long t= getNoonTime(r9,time)
+	return pushTimeAhead(r9,t,t+1L)
 }
 
 /**
@@ -13413,7 +13539,7 @@ private Map<String,LinkedHashMap> getSystemVariablesAndValues(Map r9){
 		if(res==null && c[k]!=null)res=oMv(c[k])
 		variable.value[sV]=res
 	}
-	return result.sort{ (String)it.key }
+	return result.sort{ Map.Entry<String,LinkedHashMap> it -> it.key }
 }
 
 /** define system variables, d:true also means get the variable value dynamically via gtSysVarVal */
@@ -13427,7 +13553,6 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 	LinkedHashMap dtimeT=[(sT):sDTIME,(sD):true]
 	LinkedHashMap devT=[(sT):sDEV,(sD):true]
 	LinkedHashMap t=[:] as LinkedHashMap
-	String shsm=sDLR+sHSMSTS
 	return [
 		(sDLLRDEVICE):rtnMap(sDEV,null),
 		(sDLLRDEVS):rtnMap(sDEV,null),
@@ -13435,22 +13560,17 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 		(sDARGS):t+dynT,
 		(sDJSON):t+dynT,
 		(sDRESP):t+dynT,
-		'$locationMode':t+strT,
-		'$location':rtnMap(sDEV,null),
-		'$now':t+dtimeT,
-		'$localNow':t+dtimeT, // in UI as long
-		'$utc':t+dtimeT, // in UI as long
+		(sLOCMODE):t+strT,
+		(sLOC):rtnMap(sDEV,null),
+		(sNOW):t+dtimeT,
+		(sLOCNOW):t+dtimeT, // in UI as long
+		(sUTC):t+dtimeT, // in UI special display
 
-		'$places':t+dynT,
-		'$file':t+dynT,
-		'$weather':t+dynT,
-		'$incidents':t+dynT,
-		'$hsmTripped':t+boolT,
-		(shsm):t+strT,
+		(sDLRWEAT):t+dynT,
+		(sDLRINCIDENTS):t+dynT,
+		(sHSMTRIPPED):t+boolT,
+		(sDLRHSMSTS):t+strT,
 
-		'$fuel':t+dynT,
-		'$rooms':t+dynT,
-		'$roomids':t+dynT,
 		(sHTTPCNTN):t+strT,
 		(sHTTPCODE):t+intT,
 		(sHTTPOK):t+boolT,
@@ -13490,8 +13610,6 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 		'$year':t+intT,
 		'$midnight':t+dtimeT,
 		'$noon':t+dtimeT,
-		'$calcsunrise':t+dtimeT,
-		'$calcsunset':t+dtimeT,
 		'$sunrise':t+dtimeT,
 		'$sunset':t+dtimeT,
 		'$nextMidnight':t+dtimeT,
@@ -13500,10 +13618,30 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 		'$nextSunset':t+dtimeT,
 		'$time':t+strT,
 		'$time24':t+strT,
-		'$mediaId':t+strT,
-		'$mediaUrl':t+strT,
-		'$mediaType':t+strT,
-//		'$mediaSize':t+intT,
+
+		'$random':[(sT):sDEC,(sD):true],
+		'$randomColor':t+strT,
+		'$randomColorName':t+strT,
+		'$randomLevel':t+intT,
+		'$randomSaturation':t+intT,
+		'$randomHue':t+intT,
+		'$temperatureScale':t+strT,
+
+		(sPLACES):t+dynT,
+		'$tzName':t+strT,
+		'$tzId':t+strT,
+		'$tzOffset':t+intT,
+		'$tzInDst':t+boolT,
+
+//		'$zoneName':t+strT,
+		'$zoneId': t+strT,
+		'$zoneOffset': t+intT,
+		'$zoneInDst': t+boolT,
+
+		(sFILE):t+dynT,
+		(sFUEL):t+dynT,
+		(sROOMS):t+dynT,
+		(sROOMIDS):t+dynT,
 		(sPEVATTR):t+strT,
 		(sPEVDESC):t+strT,
 		(sPEVDATE):t+dtimeT,
@@ -13516,24 +13654,10 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 //		'$previousState':t+strN,
 //		'$previousStateDuration':t+strN,
 //		'$previousStateSince':rtnMap(sDTIME,null),
-		'$random':[(sT):sDEC,(sD):true],
-		'$randomColor':t+strT,
-		'$randomColorName':t+strT,
-		'$randomLevel':t+intT,
-		'$randomSaturation':t+intT,
-		'$randomHue':t+intT,
-		'$temperatureScale':t+strT,
-
-		'$tzName':t+strT,
-		'$tzId':t+strT,
-		'$tzOffset':t+intT,
-		'$tzInDst':t+boolT,
-
-//		'$zoneName':t+strT,
-		'$zoneId': t+strT,
-		'$zoneOffset': t+intT,
-		'$zoneInDst': t+boolT,
-
+		'$mediaId':t+strT,
+		'$mediaUrl':t+strT,
+		'$mediaType':t+strT,
+//		'$mediaSize':t+intT,
 		'$version':t+strT,
 		'$versionH':t+strT,
 		'$nfl':t+dynT
@@ -13551,7 +13675,6 @@ private static String rtnStr(v,Boolean frcStr=false){
 
 @CompileStatic
 private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
-	String shsm=sDLR+sHSMSTS
 	Map<String,Map> sv=msMs(r9,sSYSVARS)
 	Map ce=mMs(r9,sCUREVT) ?: [:]
 	Map pe=mMs(r9,sPREVEVT) ?: [:]
@@ -13567,23 +13690,11 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case sHTTPOK:
 		case sIFTTTCODE:
 		case sIFTTTOK: return oMv(sv[name])
-		case '$locationMode':return gtLMode()
-		case '$localNow':	// in UI as long
-		case '$utc':		// UI special displays with proper locale
-		case '$now':
+		case sLOCMODE: return gtLMode()
+		case sLOCNOW:	// in UI as long
+		case sUTC:		// UI special displays with proper locale
+		case sNOW:
 			return wnow()
-		case '$file': String pNm=sMs(r9,snId); return readDataFLD[pNm]
-		case '$fuel': String pNm=sMs(r9,snId); return fuelDataFLD[pNm]
-		case '$rooms': return rtnStr(gtRooms(r9),frcStr)
-		case '$roomids':
-			List<String> r; r=[]
-			Map<String,Map> rms = gtRooms(r9)
-			if(rms){
-				for(Map.Entry<String,Map> a in rms){
-					r.push(a.key)
-				}
-			}
-			return rtnStr(r)
 		case sCURATTR: return rtnStr(ce[sNM])
 		case sCURDESC: return rtnStr(ce[sDESCTXT])
 		case sCURDATE: return ce[sT]
@@ -13594,40 +13705,14 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case sCURVALUE: return ce[sVAL]
 		case sCURUNIT: return ce[sUNIT]
 		case '$lastexecuted': return lMs(r9,sLEXEC)
-		case '$places': return rtnStr(mMs(r9,sSETTINGS)?.places)
-		case '$weather': return rtnStr(r9['weather'],frcStr)
-		case '$nfl': return rtnStr(r9.nfl)
-		case '$incidents': return rtnStr(r9[sINCIDENTS],frcStr)
-		case '$hsmTripped': return listWithSz(r9[sINCIDENTS])
-		case (shsm): return gtLhsmStatus()
-		case '$mediaId': return r9.mediaId
-		case '$mediaUrl': return sMs(r9,'mediaUrl')
-		case '$mediaType': return sMs(r9,'mediaType')
-//		case '$mediaSize': return (r9.mediaData!=null ? (Integer)r9.mediaData.size():null)
-		case sPEVATTR: return rtnStr(pe[sNM])
-		case sPEVDESC: return rtnStr(pe[sDESCTXT])
-		case sPEVDATE: return pe[sT]
-		case sPEVDELAY: return pe[sDELAY]
-		case sPEVDEV: return pe[sDEV] ? [sMs(pe,sDEV)]:[]
-		case sPEVDEVINDX: return pe[sINDX]
-		case sPEVPHYS: return pe[sPHYS]
-		case sPEVVALUE: return pe[sVAL]
-		case sPEVUNIT: return pe[sUNIT]
+		case sDLRWEAT: return rtnStr(r9[sWEAT],frcStr)
+		case sDLRINCIDENTS: return rtnStr(r9[sINCIDENTS],frcStr)
+		case sHSMTRIPPED: return listWithSz(r9[sINCIDENTS])
+		case sDLRHSMSTS: return gtLhsmStatus()
+
 		case '$name': return gtAppN()
 		case '$state': return (String)((Map)r9[sST])?.new
 
-		case '$tzName': return rTZ(r9).displayName
-		case '$tzId': return TZID(rTZ(r9))
-		case '$tzOffset': return rTZ(r9).getOffset(wnow())
-		case '$tzInDst': return rTZ(r9).inDaylightTime(new Date(wnow()))
-
-//		case '$zoneName': return mZ(r9).getDisplayName(TextStyle.FULL_STANDALONE, new Locale.Builder().setLanguage("en").setScript("Latn").setRegion("US").build())
-		case '$zoneId': return ZID(mZ(r9))
-		case '$zoneOffset': return mZ(r9).getRules().getOffset(Instant.ofEpochMilli(wnow())).getTotalSeconds()*1000L
-		case '$zoneInDst': return mZ(r9).getRules().isDaylightSavings(Instant.ofEpochMilli(wnow()))
-
-		case '$version': return sVER
-		case '$versionH': return sHVER
 		case '$hour': Integer h=localDate(r9).getHour(); return (h==iZ ? i12:(h>i12 ? h-i12:h))
 		case '$hour24': return localDate(r9).getHour()
 		case '$minute': return localDate(r9).getMinute()
@@ -13643,18 +13728,50 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case '$month': return localDate(r9).getMonth().getValue()
 		case '$monthName': return yearMonthsFLD[localDate(r9).getMonth().getValue()]
 		case '$year': return localDate(r9).getYear()
-		case '$midnight': return getMidnightTime(rTZ(r9))
-		case '$noon': return getNoonTime(rTZ(r9))
+		case '$midnight': return getMidnightTime(r9)
+		case '$noon': return getNoonTime(r9)
 		case '$sunrise': return getSunriseTime(r9)
 		case '$sunset': return getSunsetTime(r9)
-		case '$calcsunrise': return getCalcSunriseTime(r9)
-		case '$calcsunset': return getCalcSunsetTime(r9)
-		case '$nextMidnight': return getNextMidnightTime(rTZ(r9))
-		case '$nextNoon': return getNextNoonTime(rTZ(r9))
+		case '$nextMidnight': return getNextMidnightTime(r9)
+		case '$nextNoon': return getNextNoonTime(r9)
 		case '$nextSunrise': return getNextSunriseTime(r9)
 		case '$nextSunset': return getNextSunsetTime(r9)
 		case '$time': ZonedDateTime t=localDate(r9); Integer h=t.getHour(); Integer m=t.getMinute(); return ((h==iZ ? i12:(h>i12 ? h-i12:h))+sCLN+(m<i10 ? "0$m":"$m")+sSPC+(h<i12 ? 'A.M.':'P.M.')).toString()
 		case '$time24': ZonedDateTime t=localDate(r9); Integer h=t.getHour(); Integer m=t.getMinute(); return (h+sCLN+(m<i10 ? "0$m":"$m")).toString()
+
+		case sPLACES: return rtnStr(mMs(r9,sSETTINGS)?.places)
+		case '$tzName': return rTZ(r9).displayName
+		case '$tzId': return TZID(rTZ(r9))
+		case '$tzOffset': return rTZ(r9).getOffset(wnow())
+		case '$tzInDst': return rTZ(r9).inDaylightTime(new Date(wnow()))
+
+//		case '$zoneName': return mZ(r9).getDisplayName(TextStyle.FULL_STANDALONE, new Locale.Builder().setLanguage("en").setScript("Latn").setRegion("US").build())
+		case '$zoneId': return ZID(mZ(r9))
+		case '$zoneOffset': return mZ(r9).getRules().getOffset(Instant.ofEpochMilli(wnow())).getTotalSeconds()*1000L
+		case '$zoneInDst': return mZ(r9).getRules().isDaylightSavings(Instant.ofEpochMilli(wnow()))
+
+		case sFILE: String pNm=sMs(r9,snId); return readDataFLD[pNm]
+		case sFUEL: String pNm=sMs(r9,snId); return fuelDataFLD[pNm]
+		case sROOMS: return rtnStr(gtRooms(r9),frcStr)
+		case sROOMIDS:
+			List<String> r; r=[]
+			Map<String,Map> rms = gtRooms(r9)
+			if(rms){
+				for(Map.Entry<String,Map> a in rms){
+					r.push(a.key)
+				}
+			}
+			return rtnStr(r)
+		case sPEVATTR: return rtnStr(pe[sNM])
+		case sPEVDESC: return rtnStr(pe[sDESCTXT])
+		case sPEVDATE: return pe[sT]
+		case sPEVDELAY: return pe[sDELAY]
+		case sPEVDEV: return pe[sDEV] ? [sMs(pe,sDEV)]:[]
+		case sPEVDEVINDX: return pe[sINDX]
+		case sPEVPHYS: return pe[sPHYS]
+		case sPEVVALUE: return pe[sVAL]
+		case sPEVUNIT: return pe[sUNIT]
+
 		case '$random':
 			def tr=getRandomValue(r9,name)
 			Double r
@@ -13710,6 +13827,14 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 			}
 			return r
 		case '$temperatureScale':return gtLtScale()
+
+		case '$mediaId': return sMs(r9,sMEDIAID)
+		case '$mediaUrl': return sMs(r9,sMEDIAURL)
+		case '$mediaType': return sMs(r9,sMEDIATYPE)
+//		case '$mediaSize': return (r9[sMEDIADATA]!=null ? ((byte[])r9[sMEDIADATA]).size():null)
+		case '$version': return sVER
+		case '$versionH': return sHVER
+		case '$nfl': return rtnStr(r9.nfl)
 	}
 	return null
 }
@@ -13823,7 +13948,7 @@ Map fixHeGType(Map r9,Boolean toHubV,String typ,v){
 				Long aaa= fnd ? aa.toLong():("$v".isNumber() ? v as Long: null)
 				if(aaa!=null){
 					if(aaa<lMSDAY && aaa>=lZ){
-						Long t0=getMidnightTime(tz)
+						Long t0=getMidnightTime(r9)
 						Long a1=t0+aaa
 						myv=a1+(tz.getOffset(t0)-tz.getOffset(a1))
 					}else{
