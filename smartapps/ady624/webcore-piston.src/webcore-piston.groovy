@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update November 21, 2023 for Hubitat
+ * Last update November 24, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -558,6 +558,7 @@ static Boolean eric1(){ return false }
 @Field static final Integer i401=401
 @Field static final Integer i500=500
 @Field static final Integer i1000=1000
+@Field static final Integer i1900=1900
 @Field static final Long l500=500L
 @Field static final Long lTHOUS=1000L
 @Field static final Long lMSDAY=86400000L
@@ -4755,7 +4756,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 			Long thisDay=Math.floor((dtime/dMSDAY).toDouble()).toLong()
 
 			ZonedDateTime zdt,nzdt; zdt = localDate(r9,dtime)
-			Integer dyYear= zdt.getYear() - 1900
+			Integer dyYear= zdt.getYear()-i1900
 			Integer dyMon= zdt.getMonth().getValue()-i1
 			Integer dyDay= zdt.getDayOfWeek().getValue() % i7
 			Integer dyMonDay= zdt.getDayOfMonth()
@@ -4797,7 +4798,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 					if(lge) myDetail r9,mySt1+"month: $month year: $year ",iN2
 					nzdt= zdt.withDayOfMonth(i1)
 					nzdt= nzdt.withMonth(month+i1)
-					nzdt= nzdt.withYear(year+1900)
+					nzdt= nzdt.withYear(year+i1900)
 
 					Integer lastDayOfMonth= nzdt.with(TemporalAdjusters.lastDayOfMonth())
 							.getDayOfMonth()
@@ -4891,7 +4892,7 @@ Long evalPresetMap(Map r9, Map oper,Map operoffset,Long dayBasis,Boolean lge=fal
  * return true if operand has sunrise or sunset
  */
 @CompileStatic
-static Boolean hasPreset(Map oper){ return (oper && sMt(oper)==sS && sMs(oper,sS) in [sSUNSET, sSUNRISE]) }
+static Boolean hasPreset(Map oper){ return (oper && sMt(oper)==sS && sMs(oper,sS) in [sSUNSET,sSUNRISE]) }
 
 /**
  * Add time (mod DST)
@@ -5071,7 +5072,7 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 	if(om==null && oh==null && odw==null && odm==null && owm==null && omy==null)return lZ
 
 	ZonedDateTime zdt, nzdt; zdt = localDate(r9,time)
-	Integer dyYear= zdt.getYear() - 1900
+	Integer dyYear= zdt.getYear()-i1900
 	Integer dyMon= zdt.getMonth().getValue()-i1
 	Integer dyDate= zdt.getDayOfMonth()
 	Integer dyDay= zdt.getDayOfWeek().getValue() % i7
@@ -5081,8 +5082,7 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 	Double dminDay=1440.0D
 	Double dsecDay=86400.0D
 
-	Long lMO=-l1
-	Long res; res=lMO
+	Long res; res= -l1
 	//month restrictions
 	Integer dyMonPlus=dyMon+i1
 	if(omy!=null && omy.indexOf(dyMonPlus)<iZ){
@@ -5091,7 +5091,7 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 		month=(tI.find{ Integer it -> it>dyMonPlus } ?: i12+tI[iZ]) -i1
 		Integer year=dyYear+(month>=i12 ? i1:iZ)
 		month=(month>=i12 ? month-i12:month)
-		nzdt= zdt.withYear(year+1900)
+		nzdt= zdt.withYear(year+i1900)
 		nzdt= nzdt.withMonth(month+i1)
 		nzdt= nzdt.withDayOfMonth(i1)
 		Long ms= nzdt.toInstant().toEpochMilli()-time
@@ -8597,10 +8597,10 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 				if(exprX.startsWith(sAT2)){
 					String vn=exprX.substring(i2)
 					Map hg=wgetGlobalVar(vn) // check if it exists
+					waddInUseGlobalVar(r9,vn,true,!!hg)
 					if(hg){
 						subsId=vn
 						attr=sVARIABLE+sCLN+vn
-						waddInUseGlobalVar(r9,vn)
 					}else warn "hub varible not found while subscribing: $vn",r9
 				}else{
 					subsId=exprX
@@ -8746,10 +8746,10 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 						if(operX.startsWith(sAT2)){
 							String vn=operX.substring(i2)
 							Map hg=wgetGlobalVar(vn) // check if it exists
+							waddInUseGlobalVar(r9,vn,true,!!hg)
 							if(hg){
 								subsId=vn
 								attr=sVARIABLE+sCLN+vn
-								waddInUseGlobalVar(r9,vn)
 							}else warn "hub varible not found while subscribing: $vn",r9
 						}else{
 							subsId=operX
@@ -9784,8 +9784,8 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 			String vn=tn.substring(i2)
 			//get a variable
 			Map hg=wgetGlobalVar(vn)
+			waddInUseGlobalVar(r9,vn,true,!!hg)
 			if(hg){
-				waddInUseGlobalVar(r9,vn)
 				String typ; typ=sNL
 				def vl; vl=null
 				Map ta=fixHeGType(r9,false,sMs(hg,sTYPE),hg[sVAL])
@@ -9799,11 +9799,11 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 			if(eric())debug "getVariable hub variable (${vn}) returning ${res} to webcore",r9
 		}else{
 			loadGlobalCache()
+			waddInUseGlobalVar(r9,tn,false)
 			String wName=sMs(r9,spId)
 			def tresult=globalVarsVFLD[wName][tn]
 			if(!(tresult instanceof Map))res=err
 			else{
-				waddInUseGlobalVar(r9,tn,false)
 				res=(Map)tresult
 				String t=sMt(res)
 				def v=oMv(res)
@@ -9927,8 +9927,8 @@ private Map setVariable(Map r9,String name,value){
 			tn=var[sNM] // allow spaces
 			String vn=tn.substring(i2)
 			Map hg=wgetGlobalVar(vn)
+			waddInUseGlobalVar(r9,vn,true,!!hg)
 			if(hg){ // we know it exists and if it has a value we can know its type (overloaded String, datetime)
-				waddInUseGlobalVar(r9,vn)
 				String typ,wctyp
 				wctyp=sNL
 				def vl
@@ -9961,6 +9961,7 @@ private Map setVariable(Map r9,String name,value){
 			String lockTyp='setGlobalvar'
 			String semName=sTGBL
 			String wName=sMs(r9,spId)
+			waddInUseGlobalVar(r9,tn,false)
 			getTheLock(semName,lockTyp)
 			def tvariable=globalVarsVFLD[wName][tn]
 			if(tvariable instanceof Map){
@@ -9971,7 +9972,6 @@ private Map setVariable(Map r9,String name,value){
 				cache[tn]=variable
 				r9[sGVCACHE]=cache
 				releaseTheLock(semName)
-				waddInUseGlobalVar(r9,tn,false)
 				return variable
 			}
 			releaseTheLock(semName)
@@ -14206,7 +14206,7 @@ private Map wgetGlobalVar(String vn){
 
 @Field volatile static Map<String,Map<String,List>> globalVarsUseFLD=[:]
 
-private void waddInUseGlobalVar(Map r9,String vn, Boolean heglobal=true){
+private void waddInUseGlobalVar(Map r9,String vn,Boolean heglobal=true,Boolean exists=true){
 	String wName=sMs(r9,spId)
 	Map<String,List> vars=globalVarsUseFLD[wName] ?: [:]
 	String nvn= heglobal ? sAT2+vn : vn
@@ -14220,7 +14220,7 @@ private void waddInUseGlobalVar(Map r9,String vn, Boolean heglobal=true){
 		globalVarsUseFLD= globalVarsUseFLD
 		if(isEric(r9))myDetail r9,"added in use $nvn $wName $sa $pstns $vars",iN2
 	}
-	if(heglobal) addInUseGlobalVar(vn)
+	if(heglobal && exists) addInUseGlobalVar(vn)
 }
 
 Map<String,List> gtGlobalVarsInUse(){
