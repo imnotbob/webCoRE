@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update October 1, 2023 for Hubitat
+ *  Last update December 4, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20230828_HE'
+@Field static final String sHVER='v0.3.114.20231018_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -58,6 +58,8 @@ static Boolean eric1(){ return false }
 @CompileStatic
 private Boolean isEric(){ eric1() && isDbg() }
 
+static Boolean useRemote(){ return false }
+
 private Boolean isSystemType(){
 	if (!eric()) return isSystemTypeOrHubDeveloper()
 	return false
@@ -80,6 +82,7 @@ definition(
 @Field static final String sTEXT='text'
 @Field static final String sATTR='attribute'
 @Field static final String sDISPNM='displayName'
+@Field static final String sRID='rid'
 @Field static final String sDT='date'
 @Field static final String sGRAPHT='graphType'
 @Field static final String sLONGTS='longtermstorage'
@@ -145,6 +148,10 @@ mappings{
 	path("/getSubscriptions/"){ action: [ GET: "getSubscriptions" ] }
 	path("/updateSettings/"){ action: [ POST: "updateSettings" ] }
 	path("/tile/"){ action: [ GET: "getTile" ] }
+	path("/getFile1/"){ action: [ GET: "getFile1" ] }
+	path("/getFile2/"){ action: [ GET: "getFile2" ] }
+	path("/getFile3/"){ action: [ GET: "getFile3" ] }
+	path("/getFile4/"){ action: [ GET: "getFile4" ] }
 }
 
 def installed(){
@@ -571,6 +578,7 @@ def getTile(){
 void revokeAccessToken(){
 	state.remove('accessToken')
 	state.remove('endpoint')
+	state.remove('localEndpoint')
 	state.remove('endpointSecret')
 	state.remove('localEndpointURL')
 	state.remove('remoteEndpointURL')
@@ -587,6 +595,7 @@ void initializeAppEndpoint(Boolean disableRetry=false){
 		}
 		if(accessToken){
 			state.endpoint=getApiServerUrl()
+			state.localEndpoint=getLocalApiServerUrl()
 			state.localEndpointURL=fullLocalApiServerUrl(sBLK)
 			state.remoteEndpointURL=fullApiServerUrl(sBLK)
 			state.endpointSecret=accessToken
@@ -618,7 +627,7 @@ private void enableOauth(){
 def enableAPIPage(){
 	dynamicPage((sNM): "enableAPIPage",(sTIT): sBLK){
 		section(){
-			if(!state.endpoint) initializeAppEndpoint()
+			if(!state.localEndpoint) initializeAppEndpoint()
 			if(!state.endpoint){
 				paragraph "Endpoint creation failed"
 			}else{
@@ -845,7 +854,7 @@ Map makeFuelDataEntry(String stream, String attr='stream'){
 //String fuelNattr(){
 
 	Map ent
-	ent=[(sT): 'fuel', (sID): sF+i.toString(), rid: i, sn: stream, (sDISPNM): 'Fuel Stream '+i.toString(), (sN): n, (sC): c, (sA): attr]
+	ent=[(sT): 'fuel', (sID): sF+i.toString(), (sRID): i, sn: stream, (sDISPNM): 'Fuel Stream '+i.toString(), (sN): n, (sC): c, (sA): attr]
 
 	ent += checkLastUpd(ent)
 
@@ -882,7 +891,7 @@ Map makeSensorDataEntry(sensor,String sid,String attr){
 	if(!sid || !attr) error("no sid or attr sid: $sid attr: $attr",null,iN2)
 
 	Map ent
-	ent=[(sT):sSENSOR, (sID):sid, rid:sensor.id, (sDISPNM):sensor.displayName, (sA):attr]
+	ent=[(sT):sSENSOR, (sID):sid, (sRID):sensor.id, (sDISPNM):sensor.displayName, (sA):attr]
 
 	Map lu= checkLastUpd(ent)
 	if(lu){
@@ -933,7 +942,7 @@ Map makeQuantDataEntry(String typ,String sid,String attrn){
 	if(!ent) return [:]
 
 	Map nent
-	nent=[(sT): 'quant', (sID): sid, ent: ent, rid: ent.rid, (sDISPNM): sMs(ent,sDISPNM)+' quant', (sA): attribute]
+	nent=[(sT): 'quant', (sID): sid, ent: ent, (sRID): ent[sRID], (sDISPNM): sMs(ent,sDISPNM)+' quant', (sA): attribute]
 
 	// if to return data quantized, add to ent
 	Map params= quantParams(nent[sID],sMs(nent,sA))
@@ -1548,7 +1557,7 @@ def attributeShare1(Boolean ordered=false, String var_color=sBACKGRND){
 		for(Map ent in dataSources){
 
 			String sid=sMs(ent,sID)
-			String rid=ent.rid.toString()
+			String rid=ent[sRID].toString()
 			String attribute=sMs(ent,sA)
 			String dn= sMs(ent,sDISPNM)
 			String typ=sMs(ent,sT).capitalize()
@@ -1798,8 +1807,8 @@ List<Map> gtDataSourceData(Map ent, Boolean multiple=true, String sensorV=sNL){
 		def a=gtSetting(varn)
 		List devs= multiple ? (List)a : [a]
 
-		String rid=ent.rid.toString()
-		if(isEric())myDetail null,"varn: $varn devs ${devs} a: ${a}  rid: ${myObj(ent.rid)}",iN2
+		String rid=ent[sRID].toString()
+		if(isEric())myDetail null,"varn: $varn devs ${devs} a: ${a}  rid: ${myObj(ent[sRID])}",iN2
 
 		if(devs.size()){
 			def sensor=devs.find{
@@ -1828,7 +1837,36 @@ List<Map> gtDataSourceData(Map ent, Boolean multiple=true, String sensorV=sNL){
 
 
 
+def doFile(String file,String typ='text/javascript'){
+	String filename_= isSystemType() ? 'webcore/': '' + file
+	String ts1= " for ($filename_}"
+	Boolean ok= lowReadFile(filename_,ts1)
+	if(ok){
+		String sc= readTmpFLD[filename_]
+		return wrender(contentType: typ, data: sc, status:200)
+	}
+	return wrender(contentType: "application/json", data: """{"status":"failure"}""", status: 400)
+}
 
+def getFile1(){ doFile('a930f16d-d5f4-4f37-b874-6b0dcfd47ace-HubiGraph.js') }
+def getFile2(){ doFile('f06ea400-fe7a-49ef-8c50-6418f0a78dc6-WeatherTile2.css','text/css') }
+def getFile3(){ doFile('ba8d5ae0-1fbd-430a-bae0-bb5c0bd17ebd-WeatherTile2.js') }
+def getFile4(){ doFile('a7af9806-4b0e-4032-a78e-a41e27e4d685-WeatherTile.js') }
+
+String locationFile(String file, Boolean isSystemType){
+	if(!useRemote()){
+		return "http://${location.hub.localIP}/local/${isSystemType ? 'webcore/' : ''}${file}"
+	}else{
+		switch(file){
+			case 'a930f16d-d5f4-4f37-b874-6b0dcfd47ace-HubiGraph.js': return makeCallBackURL('getFile1/')
+			case 'f06ea400-fe7a-49ef-8c50-6418f0a78dc6-WeatherTile2.css': return makeCallBackURL('getFile2/')
+			case 'ba8d5ae0-1fbd-430a-bae0-bb5c0bd17ebd-WeatherTile2.js': return makeCallBackURL('getFile3/')
+			case 'a7af9806-4b0e-4032-a78e-a41e27e4d685-WeatherTile.js': return makeCallBackURL('getFile4/')
+			default:
+				error "Error: unknown file $file",null,iN2
+		}
+	}
+}
 
 static String scriptIncludes(){
 	String html= """
@@ -1839,10 +1877,10 @@ static String scriptIncludes(){
 	return html
 }
 
-static String scriptIncludes1(Boolean isSystemType){
+String scriptIncludes1(Boolean isSystemType){
 	String html="""
 ${scriptIncludes()}
-		<script src="/local/${isSystemType ? 'webcore/' : ''}a930f16d-d5f4-4f37-b874-6b0dcfd47ace-HubiGraph.js"></script>
+		<script src="${locationFile('a930f16d-d5f4-4f37-b874-6b0dcfd47ace-HubiGraph.js',isSystemType)}"></script>
 """
 	return html
 }
@@ -1887,7 +1925,7 @@ def attributeGauge(){
 
 				String hint= typ=='Fuel' ? " (Canister ${ent.c} Name ${ent.n})" : sBLK
 				String sid=sMs(ent,sID)
-				String rid=ent.rid.toString()
+				String rid=ent[sRID].toString()
 				String attribute=sMs(ent,sA)
 				String sa="${sid}_${attribute}".toString()
 
@@ -2012,7 +2050,8 @@ String getData_gauge(){
 		val= getLatestVal(ent,false)
 	}
 
-	return JsonOutput.toJson( [(sVAL): extractNumber(val)] )
+	Double d= Math.round(extractNumber(val) * d10) / d10
+	return JsonOutput.toJson( [(sVAL): d] )
 }
 
 Map getOptions_gauge(){
@@ -2167,7 +2206,7 @@ function parseEvent(event){
 	if(subscriptions.id == deviceId && subscriptions.attribute.includes(event.name)){
 		let value=event.value;
 
-		graphData.value=parseFloat(value.match(/[0-9.]+/g)[0]);
+		graphData.value=parseFloat(value.match(/-?[0-9.]+/g)[0]);
 
 		update();
 	}
@@ -2283,7 +2322,7 @@ Map getSubscriptions_gauge(){
 
 		if(typ==sCSENSOR){
 			subscriptions=[
-				(sID): ent.rid,
+				(sID): ent[sRID],
 				(sATTR): sMs(ent,sA)
 			]
 		}else{
@@ -2433,7 +2472,7 @@ def attributeBar(){
 
 				String sid=sMs(ent,sID)
 				String attribute=sMs(ent,sA)
-				String rid=ent.rid.toString()
+				String rid=ent[sRID].toString()
 				String dn=sMs(ent,sDISPNM)
 				String typ=sMs(ent,sT).capitalize()
 				String hint= typ=='Fuel' ? " (Canister ${ent.c} Name ${ent.n})" : sBLK
@@ -3157,7 +3196,7 @@ def attributeTimeline(){
 				//state.count_++
 				String sid=sMs(ent,sID)
 				String attribute=sMs(ent,sA)
-				String rid=ent.rid.toString()
+				String rid=ent[sRID].toString()
 				String dn=sMs(ent,sDISPNM)
 				String typ=sMs(ent,sT).capitalize()
 				String hint= typ=='Fuel' ? " (Canister ${ent.c} Name ${ent.n})" : sBLK
@@ -4136,7 +4175,7 @@ def graphTimegraph(){
 			for(Map ent in dataSources){
 
 				String sid=sMs(ent,sID)
-				String rid=ent.rid.toString()
+				String rid=ent[sRID].toString()
 				String attribute=sMs(ent,sA)
 				String dn=sMs(ent,sDISPNM)
 				String typ=sMs(ent,sT).capitalize()
@@ -5468,7 +5507,7 @@ def attributeHeatmap(){
 }
 
 static String dd(Double num){
-	if(num<10.0D) return s0+num.toInteger().toString()
+	if(num<d10) return s0+num.toInteger().toString()
 	else return num.toInteger().toString()
 }
 
@@ -7212,7 +7251,7 @@ def attributeRangebar(){
 			for(Map ent in dataSources){
 
 				String sid=sMs(ent,sID)
-				String rid=ent.rid.toString()
+				String rid=ent[sRID].toString()
 				String attribute=sMs(ent,sA)
 				String dn=sMs(ent,sDISPNM)
 				String typ=sMs(ent,sT).capitalize()
@@ -9577,7 +9616,7 @@ String defineHTML_Header(){
 	<link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons">
 	<link rel="stylesheet" href="https://code.getmdl.io/1.3.0/material.indigo-pink.min.css">
 	<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
-	<link rel="stylesheet" href="/local/${isSystemType() ? 'webcore/' : ''}f06ea400-fe7a-49ef-8c50-6418f0a78dc6-WeatherTile2.css">
+	<link rel="stylesheet" href="${locationFile('f06ea400-fe7a-49ef-8c50-6418f0a78dc6-WeatherTile2.css',isSystemType())}">
 	<script>
 		const localURL =		"${getEndpointURL()}";
 		const secretEndpoint=	"${getEndpointSecret()}";
@@ -9594,7 +9633,7 @@ String defineHTML_Header(){
 	<script src="https://cdn.jsdelivr.net/npm/gridstack@1.1.2/dist/gridstack.jQueryUI.js"></script>
 	<script type="text/javascript" src="https://www.google.com/jsapi"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui-touch-punch/0.2.3/jquery.ui.touch-punch.min.js" integrity="sha512-0bEtK0USNd96MnO4XhH8jhv3nyRF0eK87pJke6pkYf3cM0uDIhNJy9ltuzqgypoIFXw3JSuiy04tVk4AjpZdZw==" crossorigin="anonymous"></script>
-	<script defer src="/local/${isSystemType() ? 'webcore/' : ''}ba8d5ae0-1fbd-430a-bae0-bb5c0bd17ebd-WeatherTile2.js"></script>
+	<script defer src="${locationFile('ba8d5ae0-1fbd-430a-bae0-bb5c0bd17ebd-WeatherTile2.js',isSystemType())}"></script>
 	"""
 	return html
 }
@@ -10740,7 +10779,7 @@ String defineHTML_Header_forecast(){
 
 	<script src="https://code.getmdl.io/1.3.0/material.min.js"></script>
 	<!--script defer src="http://192.168.1.64:8080/WeatherTile.js"></script> -->
-	<script defer src="/local/${isSystemType() ? 'webcore/' : ''}a7af9806-4b0e-4032-a78e-a41e27e4d685-WeatherTile.js"></script>
+	<script defer src="${locationFile('a7af9806-4b0e-4032-a78e-a41e27e4d685-WeatherTile.js',isSystemType())}"></script>
 	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.0/jquery.min.js"></script>
 	<script type="text/javascript" src="https://www.google.com/jsapi"></script>
 	<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
@@ -11759,6 +11798,59 @@ static Boolean isFNF(Exception ex){
 @Field volatile static Map<String,String> readTmpFLD=[:]
 @Field volatile static Map<String,byte[]> readTmpBFLD=[:]
 
+Boolean lowReadFile(String fname,String ts1){
+	String pNm=fname
+	readTmpFLD[pNm]=sBLK
+	readTmpFLD= readTmpFLD
+	try{
+		if((String)location.hub.firmwareVersionString >= minFwVersion){
+			readTmpBFLD[pNm]=null
+			readTmpBFLD[pNm]= (byte[])downloadHubFile(fname)
+			if(readTmpBFLD[pNm].size()){
+				readTmpFLD[pNm]=new String(readTmpBFLD[pNm])
+				readTmpBFLD[pNm]=null
+				readTmpBFLD= readTmpBFLD
+			}
+
+		}else{
+			String uri="http://${location.hub.localIP}:8080/local/${fname}"
+			Map params=[
+					uri: uri,
+					contentType: "text/plain; charset=UTF-8",
+					textParser: true,
+					headers: [ "Cookie": state.cookie, "Accept": 'application/octet-stream' ]
+			]
+
+			httpGet(params){ resp ->
+				if(resp.status==200 && resp.data){
+					Integer i
+					char c
+					i=resp.data.read()
+					while(i!=-1){
+						c=(char)i
+						readTmpFLD[pNm]+=c
+						i=resp.data.read()
+					}
+					//log.warn "pNm: ${pNm} data: ${data} file: ${readDataFLD[pNm]}"
+				}else{
+					error "Read Response status $resp.status",null
+				}
+			}
+		}
+		readTmpFLD= readTmpFLD
+		return true
+	}catch(e){
+		if( isFNF(e) ){
+			debug "File DOES NOT Exist"+ts1,null,iN2
+		}else{
+			error "Read File Data"+ts1+" :: Exception: ",null,iN2,e
+		}
+		readTmpBFLD[pNm]=null
+		readTmpBFLD= readTmpBFLD
+	}
+	return false
+}
+
 /**
  * returns Map that has internal format in map.data
  * @param sensor
@@ -11787,78 +11879,31 @@ Map readFile(sensor, String attribute, String fname=sNL){
 		}
 	} catch(ignored){}
 
-
-	readTmpFLD[pNm]=sBLK
-	readTmpFLD= readTmpFLD
-
-	try{
-		if((String)location.hub.firmwareVersionString >= minFwVersion){
-			readTmpBFLD[pNm]=null
-			readTmpBFLD[pNm]= (byte[])downloadHubFile(filename_)
-			if(readTmpBFLD[pNm].size()){
-				readTmpFLD[pNm]=new String(readTmpBFLD[pNm])
-				readTmpBFLD[pNm]=null
-				readTmpBFLD= readTmpBFLD
-			}
-
-		}else{
-			String uri="http://${location.hub.localIP}:8080/local/${filename_}"
-			Map params=[
-				uri: uri,
-				contentType: "text/plain; charset=UTF-8",
-				textParser: true,
-				headers: [ "Cookie": state.cookie, "Accept": 'application/octet-stream' ]
-			]
-
-			httpGet(params){ resp ->
-				if(resp.status==200 && resp.data){
-					Integer i
-					char c
-					i=resp.data.read()
-					while(i!=-1){
-						c=(char)i
-						readTmpFLD[pNm]+=c
-						i=resp.data.read()
-					}
-					//log.warn "pNm: ${pNm} data: ${data} file: ${readDataFLD[pNm]}"
-				}else{
-					error "Read Response status $resp.status",null
-				}
-			}
-		}
-
-		readTmpFLD= readTmpFLD
+	String sensor_name=gtLbl(sensor)
+	String ts1= " for ${sensor_name} (${attribute}) ($filename_}"
+	Boolean ok= lowReadFile(filename_,ts1)
+	if(ok){
 		Integer sz
-		sz=readTmpFLD[pNm].size()
+		sz = readTmpFLD[pNm].size()
 		//myDetail null,"after read pNm: ${pNm} cache sz: $sz",iN2
-		if(sz){
+		if (sz) {
 			String sc
 			sc = readTmpFLD[pNm]
-			while(sz && sc[sz-i1]!= ']'){
-				sc = sc.substring(iZ,sz-i1)
-				sz=sc.size()
+			while (sz && sc[sz - i1] != ']') {
+				sc = sc.substring(iZ, sz - i1)
+				sz = sc.size()
 			}
-			readTmpFLD[pNm]=sc
+			readTmpFLD[pNm] = sc
 		}
 		//myDetail null,"after TRIM pNm: ${pNm} cache sz: $sz",iN2
 		List<Map> parse
-		parse=[]
-		if(sz>i1){
-			JsonSlurper jsonSlurper=new JsonSlurper()
-			parse=convertToInternal((List<Map>)jsonSlurper.parseText(readTmpFLD[pNm]))
-		}else sz=iZ
-		if(isEric())myDetail null,s+" $sz"
-		return ['size': sz, 'data': parse ]
-	}catch(e){
-		String sensor_name=gtLbl(sensor)
-		String ts1= " for ${sensor_name} (${attribute}) ($filename_}"
-		if( isFNF(e) ){
-			debug "File DOES NOT Exist"+ts1,null,iN2
-		}else{
-			error "Read File Data"+ts1+" :: Exception: ",null,iN2,e
-		}
-		readTmpBFLD[pNm]=null
-		readTmpBFLD= readTmpBFLD
+		parse = []
+		if (sz > i1) {
+			JsonSlurper jsonSlurper = new JsonSlurper()
+			parse = convertToInternal((List<Map>) jsonSlurper.parseText(readTmpFLD[pNm]))
+		} else sz = iZ
+		if (isEric()) myDetail null, s + " $sz"
+		return ['size': sz, 'data': parse]
 	}
 	readTmpFLD[pNm]=sNL
 	readTmpFLD= readTmpFLD
@@ -13677,7 +13722,7 @@ def hubiForm_list_reorder(String var, String var_color, String solid_background=
 				jQuery("#settings${var}").val(JSON.stringify(order))
 			}
 		</script>
-		<script src="/local/${isSystemType() ? 'webcore/' : ''}a930f16d-d5f4-4f37-b874-6b0dcfd47ace-HubiGraph.js"></script>
+		<script src="${locationFile('a930f16d-d5f4-4f37-b874-6b0dcfd47ace-HubiGraph.js',isSystemType())}"></script>
 		<div id="moveable" class="mdl-grid" style="margin: 0; padding: 0; text-color: white !important">
 """
 
@@ -14037,6 +14082,7 @@ private void myDetail(Map r9,String msg,Integer shift=iN1){ Map a=log(msg,r9,shi
 @Field static final String sV='v'
 
 @Field static final Double d1=1.0D
+@Field static final Double d10=10.0D
 
 private Map log(message,Map r9,Integer shift=iN2,Exception err=null,String cmd=sNL,Boolean force=false,Boolean svLog=true){
 	if(cmd==sTIMER){
@@ -14529,7 +14575,7 @@ private Map wrender(Map options=[:]){
 			try{
 				String a= string2gzip(s)
 				Integer nsz=a.size()
-				if(eric1())debug "options.data is $sz after compression $nsz  saving ${Math.round((d1-(nsz/sz))*1000.0D)/10.0D}%",null
+				if(eric1())debug "options.data is $sz after compression $nsz  saving ${Math.round((d1-(nsz/sz))*1000.0D)/d10}%",null
 //				options[sDATA]=a
 //				options[sCE]=sGZIP
 			}catch(ignored){}
@@ -14549,13 +14595,21 @@ static String string2gzip(String s){
 }
 
 private String makeCallBackURL(String path){
-	return "${getEndpointURL()}${path}?access_token=${getEndpointSecret()}".toString()
+	if(!useRemote()){
+		return "${getEndpointURL()}${path}?access_token=${getEndpointSecret()}".toString()
+	}
+	return 'parents url with id of this graph as argument'
 }
 
 private String getEndpointURL(){
-	String ep; ep= "${state.localEndpointURL}".toString()
-	if(!ep.contains('https') && ep.contains('http:')){
-		ep= ep.replace('http:', 'https:')
+	//state.remoteEndpointURL will give cloud endpoint
+	// but still need to be on local network due to js/css files on hub that are referenced
+	String ep
+	ep= useRemote() ? "${state.remoteEndpointURL}".toString() : "${state.localEndpointURL}".toString()
+	if(!useRemote()){
+		if(!ep.contains('https') && ep.contains('http:')){
+			ep= ep.replace('http:', 'https:')
+		}
 	}
 	return ep
 }
@@ -14621,7 +14675,7 @@ public Map getSettingsAndStateMap(){
 
 	List<String> stateSkip= [
 			/* "isInstalled", "isParent", */
-			"accessToken", "debugLevel", "endpoint", "endpointSecret", "localEndpointURL", "remoteEndpointURL",
+			"accessToken", "debugLevel", "endpoint", "localEndpoint", "endpointSecret", "localEndpointURL", "remoteEndpointURL",
 			"dupPendingSetup", "dupOpenedByUser"
 	]
 	data.state= ((Map<String,Object>)state)?.findAll{ !((String)it?.key in stateSkip) }
