@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update December 4, 2023 for Hubitat
+ *  Last update January 2, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20231018_HE'
+@Field static final String sHVER='v0.3.114.20240101_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -58,7 +58,7 @@ static Boolean eric1(){ return false }
 @CompileStatic
 private Boolean isEric(){ eric1() && isDbg() }
 
-static Boolean useRemote(){ return false }
+static Boolean useRemote(){ return eric1() }
 
 private Boolean isSystemType(){
 	if (!eric()) return isSystemTypeOrHubDeveloper()
@@ -195,7 +195,7 @@ private void processDuplication(){
 		}
 	}
 
-	parent.childAppDuplicationFinished("graphs", dupSrcId)
+	(void)parent.childAppDuplicationFinished("graphs", dupSrcId)
 	info "Duplicated Graph has been created... Please open the new graph and configure to complete setup...",null
 }
 
@@ -212,7 +212,7 @@ def uninstalled(){
 
 	Map foo=(Map)state.fuelStream
 	if(foo){
-		parent.resetFuelStreamList()
+		(void)parent.resetFuelStreamList()
 		fuelFLD=null
 		readTmpFLD= [:]
 		readTmpBFLD= [:]
@@ -706,7 +706,7 @@ static Map decodeStreamN(String stream){
 @Field static List<Map>fuelFLD
 
 List<Map> gtFuelList(){
-	fuelFLD= !fuelFLD ? parent.listFuelStreams(false) : fuelFLD
+	fuelFLD= !fuelFLD ? (List)parent.listFuelStreams(false) : fuelFLD
 	return fuelFLD
 }
 
@@ -1132,7 +1132,7 @@ def gatherFuelSource(String fvarn,String ftit,Boolean multiple,Boolean allowLast
 
 			String name=encodeStreamN(stream)
 
-			List<Map>fdata=parent.readFuelStream(stream)
+			List<Map>fdata= (List<Map>)parent.readFuelStream(stream)
 			sz=fdata.size()
 			if(sz){
 				//if(!deflt) deflt=name
@@ -1593,6 +1593,12 @@ def local_graph_url(){
 	List<String> container
 	container=[]
 	hubiForm_section("Local Graph URL", i1, "link", sBLK){
+		if(useRemote()){
+			container << hubiForm_switch([(sTIT): "Use cloud endpoints?", (sNM): 'use_cloudEP', (sDEFLT): false, (sSUBONCHG): true])
+		}else{
+			app.updateSetting('use_cloudEP', [(sTYPE):sBOOL, (sVAL):sFALSE])
+		}
+		container << hubiForm_switch([(sTIT): "Use https for any local hub access?", (sNM): 'use_https', (sDEFLT): true, (sSUBONCHG): true])
 		String s= makeCallBackURL('graph/')
 		container << hubiForm_text(s, s)
 
@@ -1798,7 +1804,7 @@ List<Map> gtDataSourceData(Map ent, Boolean multiple=true, String sensorV=sNL){
 	if(typ=='Fuel'){
 		Map stream= findStream(sMs(ent,'sn'))
 		if(stream)
-			res=parent.readFuelStream(stream)
+			res= (List<Map>)parent.readFuelStream(stream)
 		else warn 'gtDataSourceData: stream not found',null
 	}
 
@@ -1854,7 +1860,7 @@ def getFile3(){ doFile('ba8d5ae0-1fbd-430a-bae0-bb5c0bd17ebd-WeatherTile2.js') }
 def getFile4(){ doFile('a7af9806-4b0e-4032-a78e-a41e27e4d685-WeatherTile.js') }
 
 String locationFile(String file, Boolean isSystemType){
-	if(!useRemote()){
+	if(!useRemote() || !gtSetB('use_cloudEP')){
 		return "http://${location.hub.localIP}/local/${isSystemType ? 'webcore/' : ''}${file}"
 	}else{
 		switch(file){
@@ -9464,7 +9470,7 @@ void buildWeatherData(){
 	if(isEric())debug "buildWeatherData",null
 	//def selections=settings["tile_settings"]
 
-	Map data=parent.getWData()
+	Map data= (Map)parent.getWData()
 	//log.debug "buildWeatherData got ${data.size()}"
 
 	List<Map> temp=(List<Map>)state.tile_settings
@@ -10567,7 +10573,7 @@ def tileForecast(){
 	dynamicPage((sNM): "graphSetupPage"){
 
 		List<String> container
-		Map map=parent.openWeatherConfig()
+		Map map= (Map)parent.openWeatherConfig()
 		hubiForm_section("General Options", i1, sBLK, sBLK){
 			//input( (sTYPE): sENUM, (sNM): "openweather_refresh_rate",(sTIT): "<b>Select OpenWeather Update Rate</b>", (sMULTP): false, (sREQ): true, options: updateEnum, (sDEFV): "300000")
 /*			if(gtSetB('override_openweather')){
@@ -14594,19 +14600,45 @@ static String string2gzip(String s){
 	return result.encodeBase64()
 }
 
+@Field static final String sDIV='/'
+
+def gforward(String path){
+	String ep; ep = path
+	if(ep.endsWith(sDIV))ep=ep.substring(iZ,ep.length()-i1)
+	if(ep in ['graph', 'tile']) ep='get'+ep.capitalize()
+	if(isDbg()) myDetail null,"forwarding to $ep",iN2
+	"${ep}"()
+}
+
+@Field volatile static Map<String,String> endPointFLD=[:]
+@Field volatile static String parentHashFLD=''
+
 private String makeCallBackURL(String path){
-	if(!useRemote()){
+	if(!useRemote() || !gtSetB('use_cloudEP')){
 		return "${getEndpointURL()}${path}?access_token=${getEndpointSecret()}".toString()
 	}
-	return 'parents url with id of this graph as argument'
+	Map t0; t0= endPointFLD
+	if(!t0){
+		t0=(Map)parent.getWCendpoints()
+		endPointFLD= t0
+	}
+	String id; id= parentHashFLD
+	if(!id){
+		id= (String)parent.hashPID(sAppId())
+		parentHashFLD= id
+	}
+	//if(isDbg()) myDetail null,"create URL ${t0.cp}/gforward/${id}?access_token=${t0.at}&path=${path}",iN2
+	return "${t0.cp}/gforward/${id}?access_token=${t0.at}&path=${path}".toString()
 }
 
 private String getEndpointURL(){
-	//state.remoteEndpointURL will give cloud endpoint
+	// only a local endpoint
+	// state.remoteEndpointURL will give cloud endpoint to this app
 	// but still need to be on local network due to js/css files on hub that are referenced
 	String ep
-	ep= useRemote() ? "${state.remoteEndpointURL}".toString() : "${state.localEndpointURL}".toString()
-	if(!useRemote()){
+	//ep= useRemote() && gtSetB('use_cloudEP') ? "${state.remoteEndpointURL}".toString() : "${state.localEndpointURL}".toString()
+	ep= "${state.localEndpointURL}".toString()
+	if(gtSetB('use_https')){
 		if(!ep.contains('https') && ep.contains('http:')){
 			ep= ep.replace('http:', 'https:')
 		}

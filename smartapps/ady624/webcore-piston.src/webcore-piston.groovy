@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update November 24, 2023 for Hubitat
+ * Last update January 1, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20231008_HE'
+@Field static final String sHVER='v0.3.114.20240101_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -6031,14 +6031,18 @@ private Long vcmd_sendPushNotification(Map r9,device,List prms){
 	String pd='pushDev'
 	if(r9[initP]==null){
 		r9[pd]=wgetPushDev()
-		r9[initP]=true
+		if(r9[pd]!=null) r9[initP]=true
 	}
-	List t0= (List)r9[pd]
-	try{
-		t0*.deviceNotification(message)
-	}catch(ignored){
+	if(bIs(r9,initP)){
+		List t0= (List)r9[pd]
+		try{
+			t0*.deviceNotification(message)
+		}catch(ignored){
+			r9[initP]=null
+		}
+	}
+	if(!bIs(r9,initP)){
 		message="Default push device not set properly in webCoRE "+message
-		r9[initP]=null
 		error message,r9
 	}
 	return lZ
@@ -6544,9 +6548,9 @@ void ahttpRequestHandler(resp,Map callbackData){
 				if(sMs(data,sRESULT)=='OK' && data.url){
 					mediaId=sMs(data,sID)
 					mediaUrl=sMs(data,'url')
-				}else if(sMs(data,'message')) erMsg="storeMedia Error storing media item: $data.message"+erMsg
+				}else if(sMs(data,'message')) erMsg=sSTOREM+" Error storing media item: $data.message"+erMsg
 				data=null
-			}else erMsg='storeMedia'+erMsg
+			}else erMsg=sSTOREM+erMsg
 			setRtData=[(sMEDIAID):mediaId,(sMEDIAURL):mediaUrl]
 	}
 	if(erMsg!=sNL) error erMsg,null
@@ -7363,6 +7367,8 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 				case sHSMRULE:
 				case sHSMRULES:
 				case sPSTNRSM:
+				case 'cloudBackup':
+				case 'lowMemory':
 				case 'systemStart':
 				case 'severeLoad':
 				case 'zigbeeOff':
@@ -8694,6 +8700,8 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 						case sMODE:
 						case sTILE:
 						case sPWRSRC:
+						case 'cloudBackup':
+						case 'lowMemory':
 						case 'systemStart':
 						case 'severeLoad':
 						case 'zigbeeOff':

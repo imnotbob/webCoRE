@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update October 25, 2023 for Hubitat
+ * Last update January 2, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -31,8 +31,8 @@
 //file:noinspection GrMethodMayBeStatic
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20231008_HE'
-@Field static final String sHVERSTR='v0.3.114.20231008_HE - November 16, 2023'
+@Field static final String sHVER='v0.3.114.20240101_HE'
+@Field static final String sHVERSTR='v0.3.114.20240101_HE - January 2, 2024'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -1303,6 +1303,9 @@ Map getWCendpoints(){
 	ep=apiServerUrl("$hubUID/apps/${app.id}".toString())
 	epl=localApiServerUrl("${app.id}".toString())
 
+	if(ep.endsWith(sDIV))ep=ep.substring(iZ,ep.length()-i1)
+	t0.cp=ep
+
 	if(isCustomEndpoint()) ep=epl
 	if(ep.endsWith(sDIV))ep=ep.substring(iZ,ep.length()-i1)
 	if(epl.endsWith(sDIV))epl=epl.substring(iZ,epl.length()-i1)
@@ -1428,6 +1431,7 @@ mappings{
 	path("/global/:varName"){action: [GET: "api_global"]}
 	path("/tap"){action: [POST: "api_tap"]}
 	path("/tap/:tapId"){action: [GET: "api_tap"]}
+	path("/gforward/:pistonIdOrName"){action: [GET: "api_forward", POST: "api_forward"]}
 }
 
 private Map api_get_error_result(String error,String m=sNL){
@@ -1893,10 +1897,9 @@ private api_intf_dashboard_piston_create(){
 	renderRes(result)
 }
 
-private findPiston(String id, String nm=sNL){
+private findPiston(String id, String nm=sNL, String n=handlePistn()){
 	def piston; piston=null
 	if(id!=sNL || nm!=sNL){
-		String n=handlePistn()
 		List t0; t0=wgetChildApps().findAll{ (String)it.name==n }
 		if(id!=sNL){
 			piston=t0.find{ hashPID(it.id)==id }
@@ -2283,6 +2286,8 @@ private api_intf_dashboard_piston_tile(){
 	common_Simple(p, "Clicked a piston tile", 'clickTile', p.tile, false)
 }
 
+//path("/intf/dashboard/piston/set.bin"){action: [GET: "api_intf_dashboard_piston_set_bin"]}
+// ?access_token=token&id=pid&bin=bin&token=idetoken
 private api_intf_dashboard_piston_set_bin(){
 	Map p=(Map)params
 	common_Simple(p, "Received set piston bin", 'setBin', sMs(p,'bin'), true)
@@ -2881,6 +2886,45 @@ def api_email(){
 		sendLocationEvent([(sNM): "email.${pistonId}", (sVAL): pistonId, isStateChange: true, linkText: "Email event", descriptionText: "${handle()} has received an email from $from", (sDATA): data])
 	}
 	wrender( [ (sCONTENTT): 'text/plain', (sDATA): 'OK' ])
+}
+
+//path("/gforward/:pistonIdOrName"){action: [GET: "api_forward", POST: "api_forward"]}
+//return "${t0.cp}/gforward?access_token=${t0.at}&id=${sAppId()}&path=${path}".toString()
+private api_forward(){
+	Map data,result
+	result=[:]
+	data=[:]
+	//def remoteAddr=isHubitat() ? "UNKNOWN" : request.getHeader("X-FORWARDED-FOR") ?: request.getRemoteAddr()
+	def remoteAddr
+	remoteAddr=request.headers.'X-forwarded-for' ?: request.headers.Host
+	if(remoteAddr==null)remoteAddr=request.'X-forwarded-for' ?: request.Host
+	if(remoteAddr==null)remoteAddr='just'
+	debug "Dashboard or web request received to forward to graph from IP $remoteAddr Referer: ${request.headers.Referer}"
+//log.debug "params ${params} request: ${request}"
+	Map p=(Map)params
+	if(p){
+		for(param in p){
+			if(!((String)param.key in ['access_token', 'pistonIdOrName'])){
+				data[(String)param.key]=param.value
+			}
+		}
+	}
+	data=data+(request?.JSON ?: [:])
+	data.remoteAddr=remoteAddr
+	data.referer=request.headers.Referer
+	String pistonIdOrName= sMs(p,'pistonIdOrName')
+	def piston= findPiston(pistonIdOrName,pistonIdOrName,handleFuelS())
+	//private findPiston(String id, String nm=sNL, String n=handlePistn()){
+	//private static String handleFuelS(){ return sWC+sFUELS }
+	if(piston!=null){
+		//"External forward for graph ${(String)piston.label} request from IP $remoteAddr".toString(),
+		return piston.gforward(data.path)
+	}else{
+		result.result='ERROR'
+		error "Piston not found for dashboard or web Request to forward to a graph $data from IP $remoteAddr $pistonIdOrName"
+	}
+	result[sTMSTMP]=wnow()
+	wrender( [ (sCONTENTT): sAPPJAVA, (sDATA): JsonOutput.toJson(result) ] )
 }
 
 private api_execute(){
@@ -5720,6 +5764,8 @@ private Map<String,Map> virtualDevices(){
 		pistonResume: 	[ (sN): 'Piston Resumed',	(sT): sSTR,		(sM): true],
 // HE specific events
 		rule:			[ (sN): 'Rule',				(sT): sENUM,	(sO): getRuleOptions(),		(sM): true ],
+		cloudBackup:	[ (sN): 'Cloud Backup',		(sT): sSTR,		(sM): true],
+		lowMemory:		[ (sN): 'Low Memory',		(sT): sSTR,		(sM): true],
 		systemStart:	[ (sN): 'System Start',		(sT): sSTR,		(sM): true],
 		severeLoad:		[ (sN): 'Severe Load',		(sT): sSTR,		(sM): true],
 		zigbeeOff:		[ (sN): 'Zigbee Off',		(sT): sSTR,		(sM): true],
