@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update March 26, 2023 for Hubitat
+ * Last update August 19, 2023 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -262,6 +262,7 @@ public void ahttpRequestHandler(resp, callbackData){
 
 		if(!json) return
 
+		// add some common fields to all results
 		json.time=t
 		json.weatherType=weatherType
 		json.wunits=wunits
@@ -404,9 +405,15 @@ public void ahttpRequestHandler(resp, callbackData){
 			}
 //			String jsonData = groovy.json.JsonOutput.toJson(json)
 //log.debug jsonData
+
 		} else if(weatherType == 'OpenWeatherMap'){
 //			String jsonData = groovy.json.JsonOutput.toJson(json)
 //log.debug jsonData
+
+			def coords = getPosition()
+			json.altitude= coords.altitude
+			json.azimuth= coords.azimuth
+
 
 			def sunTimes = app.getSunriseAndSunset()
 			Long sunrise, sunset, time
@@ -479,6 +486,86 @@ void fillCodes(Map t0,Boolean is_day){
 	tt2 = getWUIconNum(wuCode)
 	t0.code = wuCode
 	t0.wuicon = tt2
+}
+
+///
+/// Calculations
+// based on SunCalc by Justin Walker
+///
+
+// date/time constants and conversions
+static Integer dayMs() { return 1000 * 60 * 60 * 24 }
+
+static Long J1970() { return 2440588L }
+
+static Long J2000() { return 2451545L }
+
+static Double rad() { return  Math.PI / 180.0D }
+
+static Double e() { return  rad() * 23.4397D } // obliquity of the Earth
+
+static Double toJulian() {
+	Date date = new Date()
+	Double l = date.getTime() / dayMs() - 0.5D + J1970()
+	return l
+}
+
+static Date fromJulian(Double j)  { return new Date(Math.round((j + 0.5D - J1970()) * dayMs()) ) }
+static Integer toDays(){ return toJulian() - J2000() }
+
+// general calculations for position
+
+static Double rightAscension(Double l, Double b) { return Math.atan2(Math.sin(l) * Math.cos(e()) - Math.tan(b) * Math.sin(e()), Math.cos(l)) }
+static Double declination(Double l, Double b)    { return Math.asin(Math.sin(b) * Math.cos(e()) + Math.cos(b) * Math.sin(e()) * Math.sin(l)) }
+
+static Double azimuth(Double H, Double phi, Double dec)  { return Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)) }
+static Double altitude(Double H, Double phi, Double dec) { return Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H)) }
+
+static Double siderealTime(Double d, Double lw) { return rad() * (280.16D + 360.9856235D * d) - lw }
+
+// general sun calculations
+
+static Double solarMeanAnomaly(Double d) { return rad() * (357.5291D + 0.98560028D * d) }
+
+static Double eclipticLongitude(Double M) {
+
+	Double C = rad() * (1.9148D * Math.sin(M) + 0.02D * Math.sin(2.0D * M) + 0.0003D * Math.sin(3.0D * M)) // equation of center
+	Double P = rad() * 102.9372D // perihelion of the Earth
+
+	return M + C + P + Math.PI
+}
+
+static LinkedHashMap<String,Double> sunCoords(Double d) {
+
+	Double M = solarMeanAnomaly(d)
+	Double L = eclipticLongitude(M)
+
+	return [dec: declination(L, 0D), ra: rightAscension(L, 0D)]
+}
+
+// calculates sun position for a given date and latitude/longitude
+
+LinkedHashMap<String,Double> getPosition() {
+
+	Double lng = ((BigDecimal)location.longitude).toDouble()
+	Double lat = ((BigDecimal)location.latitude).toDouble()
+
+	Double lw  = rad() * -lng
+	Double phi = rad() * lat
+	Double d   = toDays()
+	LinkedHashMap<String,Double> c  = sunCoords(d)
+	Double H  = siderealTime(d, lw) - c.ra
+
+	Double az; az = azimuth(H, phi, c.dec)
+	az = (az * 180.0D / Math.PI) + 180.0D
+
+	Double al; al = altitude(H, phi, c.dec)
+	al = al * 180.0D / Math.PI
+
+	return [
+			azimuth: az,
+			altitude: al,
+	]
 }
 
 public Map getWData(){
