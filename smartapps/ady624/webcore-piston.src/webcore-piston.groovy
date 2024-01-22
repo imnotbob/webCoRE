@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update January 1, 2024 for Hubitat
+ * Last update January 15, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -33,7 +33,7 @@
 //file:noinspection UnnecessaryQualifiedReference
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20240101_HE'
+@Field static final String sHVER='v0.3.114.20240115_HE'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -9300,7 +9300,7 @@ private static String fixAttr(String attr){
 		case sALRMSSTATUS:
 			return sHSMSTS
 		case sALRMSYSALRT:
-			return sHSMSARM
+			return sHSMALRT
 		case sALRMSYSEVT:
 			return sHSMSARM
 		case sALRMSYSRULE:

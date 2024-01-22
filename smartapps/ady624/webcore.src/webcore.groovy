@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update January 2, 2024 for Hubitat
+ * Last update January 15, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -31,8 +31,8 @@
 //file:noinspection GrMethodMayBeStatic
 
 @Field static final String sVER='v0.3.114.20220203'
-@Field static final String sHVER='v0.3.114.20240101_HE'
-@Field static final String sHVERSTR='v0.3.114.20240101_HE - January 2, 2024'
+@Field static final String sHVER='v0.3.114.20240115_HE'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - January 15, 2024'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -5668,8 +5668,11 @@ private static Map getHubitatAlarmSystemStatusOptions(){
 private static Map getAlarmSystemAlertOptions(){
 	return [
 		intrusion:		"Intrusion Away",
+		"intrusion-delay": "Intrusion Away Delay",
 		"intrusion-home":	"Intrusion Home",
+		"intrusion-home-delay": "Intrusion Home Delay",
 		"intrusion-night":	"Intrusion Night",
+		"intrusion-night-delay": "Intrusion Night Delay",
 		smoke:			"Smoke",
 		water:			"Water",
 		rule:			"Rule",

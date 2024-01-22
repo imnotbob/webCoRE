@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update August 19, 2023 for Hubitat
+ * Last update January 21, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -269,6 +269,10 @@ public void ahttpRequestHandler(resp, callbackData){
 		json.name = location.name
 		json.zipCode = location.zipCode
 
+		LinkedHashMap<String,Double> coords = getPosition()
+		json.altitude= coords.altitude
+		json.azimuth= coords.azimuth
+
 		if(weatherType == 'apiXU'){
 			if(json.forecast && json.forecast.forecastday){
 				List<Map> lt0=(List<Map>)json.forecast.forecastday
@@ -410,10 +414,6 @@ public void ahttpRequestHandler(resp, callbackData){
 //			String jsonData = groovy.json.JsonOutput.toJson(json)
 //log.debug jsonData
 
-			def coords = getPosition()
-			json.altitude= coords.altitude
-			json.azimuth= coords.azimuth
-
 
 			def sunTimes = app.getSunriseAndSunset()
 			Long sunrise, sunset, time
@@ -494,11 +494,11 @@ void fillCodes(Map t0,Boolean is_day){
 ///
 
 // date/time constants and conversions
-static Integer dayMs() { return 1000 * 60 * 60 * 24 }
+static Double dayMs() { return 1000.0D * 60 * 60 * 24 }
 
-static Long J1970() { return 2440588L }
+static Double J1970() { return 2440588.0D }
 
-static Long J2000() { return 2451545L }
+static Double J2000() { return 2451545.0D }
 
 static Double rad() { return  Math.PI / 180.0D }
 
@@ -506,12 +506,12 @@ static Double e() { return  rad() * 23.4397D } // obliquity of the Earth
 
 static Double toJulian() {
 	Date date = new Date()
-	Double l = date.getTime() / dayMs() - 0.5D + J1970()
+	Double l = date.getTime().toDouble() / dayMs() - 0.5D + J1970()
 	return l
 }
 
 static Date fromJulian(Double j)  { return new Date(Math.round((j + 0.5D - J1970()) * dayMs()) ) }
-static Integer toDays(){ return toJulian() - J2000() }
+static Double toDays(){ return toJulian() - J2000() }
 
 // general calculations for position
 
