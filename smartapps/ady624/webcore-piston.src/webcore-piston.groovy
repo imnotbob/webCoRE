@@ -1205,6 +1205,7 @@ Map activity(lastLogTimestamp){
 }
 
 // called by parent if it does not have piston information for IDE dashboard
+// related to shortRtd method
 @CompileStatic
 Map curPState(){
 	Map t0
@@ -7289,6 +7290,12 @@ private Map mevaluateOperand(Map r9,Map oper,Integer index=null,Boolean trigger=
 }
 
 @CompileStatic
+private Double evalDecimalOperand(Map r9,Map operand){
+	Map value=mevaluateOperand(r9,operand)
+	return dcast(r9,value ? oMv(value):sBLK)
+}
+
+@CompileStatic
 private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trigger=false,Boolean nextMidnight=false,Long dayBasis=null){
 	String myS,nodeI
 	myS=sBLK
@@ -7491,11 +7498,6 @@ private static Map addVDevFlds(Map r9,String attr,Boolean eXcluded){
 
 private Map callFunc(Map r9,String func,List p){
 	return (Map)"func_${func}"(r9,p)
-}
-
-private Double evalDecimalOperand(Map r9,Map operand){
-	Map value=mevaluateOperand(r9,operand)
-	return dcast(r9,value ? oMv(value):sBLK)
 }
 
 
@@ -10136,11 +10138,11 @@ Map proxyEvaluateExpression(LinkedHashMap mr9,Map expression,String dataType=sNL
 	r9[sEVENT]=[:]
 	r9[sCUREVT]=[:]
 	try{
-		Map res; res=evaluateExpression(r9,expression,dataType)
+		Map res; res=evaluateExpression(r9,expression,dataType,true)
 		if(sMt(res)==sDEV && sMa(res)!=sNL){
 			def device=getDevice(r9, sLi(liMv(res),iZ) )
 			Map attr=devAttrT(sMa(res),device)
-			res=evaluateExpression(r9,res,sMt(attr) ?: sSTR)
+			res=evaluateExpression(r9,res,sMt(attr) ?: sSTR,true)
 		}
 		r9=null
 		return res
@@ -10245,7 +10247,7 @@ private String strEvalExpr(Map r9,Map express,String rtndataType=sSTR){
 }
 
 @CompileStatic
-private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
+private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL, Boolean proxy=false){
 	//if dealing with an expression that has multiple items let's evaluate each item one by one
 	if(!express)return rtnMapE('Null expression')
 	Long time=wnow()
@@ -10312,6 +10314,7 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 		case sVARIABLE:
 			//get variable {t:type,v:value}
 			result=getVariable(r9,sMs(expression,sX)+(sMs(expression,sXI)!=sNL ? sLB+sMs(expression,sXI)+sRB:sBLK))
+			if(proxy && isErr(result)) result=rtnMapI(iZ) // try to deal with variable not yet defined for IDE session
 			break
 		case sDEV:
 			if(exprV instanceof List){

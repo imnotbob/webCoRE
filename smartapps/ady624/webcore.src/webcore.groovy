@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update January 15, 2024 for Hubitat
+ * Last update February 15, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - January 15, 2024'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - February 15, 2024'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -1512,9 +1512,13 @@ List<Map> gtCachedchildApps(String wName,Boolean haveLock=false){
 	return res
 }
 
-static void clearCachedchildApps(String wName){
+@Field static final String sCLRCACHED='clearCached'
+
+void clearCachedchildApps(String wName, Boolean haveLock=false){
+	if(!haveLock) Boolean didw=getTheLock(sCLRCACHED)
 		childAppsFLD[wName]= []
 		childAppsFLD= childAppsFLD
+	if(!haveLock) releaseTheLock(sCLRCACHED)
 }
 
 
