@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update January 15, 2024 for Hubitat
+ * Last update January 24, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -10132,17 +10132,28 @@ Map setLocalVariable(String name,value){ // called by parent (IDE) to set a vari
 
 /** EXPRESSION FUNCTIONS							**/
 
-Map proxyEvaluateExpression(LinkedHashMap mr9,Map expression,String dataType=sNL){
+/**
+ * called by parent to evaluate on the fly for IDE
+ */
+@CompileStatic
+Map proxyEvaluateExpression(LinkedHashMap mr9,Map expression,String dataType=sNL, List<Map>vars=null){
 	LinkedHashMap r9; r9=getRunTimeData(mr9)
 	resetRandomValues(r9)
 	r9[sEVENT]=[:]
 	r9[sCUREVT]=[:]
 	try{
-		Map res; res=evaluateExpression(r9,expression,dataType,true)
+		if(vars){
+			Map aS
+			aS=getCachedMaps('proxyEvaluateExpression glv')
+			aS=aS!=null?aS:[:]
+			getLocalVariables(r9,aS,true,true, vars)
+		}
+
+		Map res; res=evaluateExpression(r9,expression,dataType)
 		if(sMt(res)==sDEV && sMa(res)!=sNL){
 			def device=getDevice(r9, sLi(liMv(res),iZ) )
 			Map attr=devAttrT(sMa(res),device)
-			res=evaluateExpression(r9,res,sMt(attr) ?: sSTR,true)
+			res=evaluateExpression(r9,res,sMt(attr) ?: sSTR)
 		}
 		r9=null
 		return res
@@ -10247,7 +10258,7 @@ private String strEvalExpr(Map r9,Map express,String rtndataType=sSTR){
 }
 
 @CompileStatic
-private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL, Boolean proxy=false){
+private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 	//if dealing with an expression that has multiple items let's evaluate each item one by one
 	if(!express)return rtnMapE('Null expression')
 	Long time=wnow()
@@ -10314,7 +10325,6 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL, Boolea
 		case sVARIABLE:
 			//get variable {t:type,v:value}
 			result=getVariable(r9,sMs(expression,sX)+(sMs(expression,sXI)!=sNL ? sLB+sMs(expression,sXI)+sRB:sBLK))
-			if(proxy && isErr(result)) result=rtnMapI(iZ) // try to deal with variable not yet defined for IDE session
 			break
 		case sDEV:
 			if(exprV instanceof List){
@@ -13488,7 +13498,7 @@ private Long getNextNoonTime(Map r9,Long time=null){
  * @param frc - if has initial value, use it
  */
 @CompileStatic
-private void getLocalVariables(Map r9,Map aS, Boolean frc=true){
+private void getLocalVariables(Map r9,Map aS, Boolean frc=true, Boolean proxy=false, List<Map> vars=null){
 	/*String myS; myS=sBLK
 	Boolean lge=isEric(r9)
 	if(lge){
@@ -13498,7 +13508,7 @@ private void getLocalVariables(Map r9,Map aS, Boolean frc=true){
 	r9[sLOCALV]=[:]
 	String t
 	Map values=mMs(aS,sVARS)
-	List<Map>l=(List<Map>)oMv(mMs(r9,sPISTN))
+	List<Map>l= proxy && vars ? vars : (List<Map>)oMv(mMs(r9,sPISTN))
 	if(!l)return
 	Boolean lg=isDbg(r9)
 	//if(lge) myDetail r9,"values: $values",iN2
@@ -13512,7 +13522,7 @@ private void getLocalVariables(Map r9,Map aS, Boolean frc=true){
 		Boolean hasival= ival!=null
 		Boolean isconst= hasival && sMa(var)==sS && !t.endsWith(sRB)
 		Boolean useival= hasival && (v==null || frc || isconst)
-		if(useival && v!=null){ // clean out any changed value
+		if(!proxy && useival && v!=null){ // clean out any changed value
 			clearVariable(r9,tn)
 			if(lg)debug 'Reinitializing preset variable: '+tn,r9
 		}

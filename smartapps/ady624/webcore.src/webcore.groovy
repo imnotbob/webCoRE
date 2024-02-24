@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update February 15, 2024 for Hubitat
+ * Last update February 24, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - February 15, 2024'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - February 24, 2024'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -2797,9 +2797,13 @@ private api_intf_dashboard_piston_evaluate(){
 	if(verifySecurityToken(p)){
 		def piston=findPiston(sMs(p,'id'))
 		if(piston){
+			List<Map> vars; vars=null
+			try{
+				vars=(List<Map>) new JsonSlurper().parseText(new String((sMs(p,sV)).decodeBase64(), sUTF8))
+			}catch(ignore){}
 			LinkedHashMap expression=(LinkedHashMap) new JsonSlurper().parseText(new String((sMs(p,'expression')).decodeBase64(), sUTF8))
 			Map msg=timer "Evaluating expression"
-			result=[(sSTS): sSUCC, (sVAL): piston.proxyEvaluateExpression(null /* getRunTimeData()*/, expression, sMs(p,'dataType'))]
+			result=[(sSTS): sSUCC, (sVAL): piston.proxyEvaluateExpression(null /* getRunTimeData()*/, expression, sMs(p,'dataType'), vars)]
 			trace msg
 		}else{ result=api_get_error_result(sERRID) }
 	}else{ result=api_get_error_result(sERRTOK) }
