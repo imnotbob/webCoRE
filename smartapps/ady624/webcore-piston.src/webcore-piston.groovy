@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update February 24, 2024 for Hubitat
+ * Last update March 2, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -4880,7 +4880,7 @@ Long evalPresetMap(Map r9, Map oper,Map operoffset,Long dayBasis,Boolean lge=fal
 	if(lge) myDetail r9,mySt1+mySt,i1
 	Long dtime
 	//let's get the at time and offset
-	dtime= longEvalExpr(r9,mevaluateOperand(r9,oper,null,false,false,dayBasis),sDTIME)-getMidnightTime(r9)+getMidnightTime(r9,dayBasis)
+	dtime= longEvalExpr(r9,mevaluateOperand(r9,oper,null,false,false,dayBasis),sTIME)+getMidnightTime(r9,dayBasis)
 	if(sMt(oper)!=sC){
 		Map offset=mevaluateOperand(r9,operoffset)
 		dtime+=longEvalExpr(r9,rtnMap1(offset))
@@ -4924,19 +4924,32 @@ private static Long pushTimeAhead(Map r9,Long pastTime,Long curTime, Boolean dst
 }
 
 @CompileStatic
-Long evalRO1(Map r9,Map ro,Long now,Long t,Map tv1){
-	return	(longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,false,t),sDTIME)-getMidnightTime(r9,now)+getMidnightTime(r9,t)
-			+ (tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ) )
+Long evalRO1(Map r9,Map ro,Long t,Map tv1){
+	//Boolean lge=isDbg(r9) && isEric(r9)
+	//if(lge)
+	//	myDetail r9,"evalRO1: ro: $ro t: $t tv1: $tv1", i1
+	Long ret= ( longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,false,t),sTIME)+getMidnightTime(r9,t) )
+			+ (tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ)
+	//if(lge)
+	//	myDetail r9,"evalRO1: t: $t tv1: $tv1 ret: $ret"
+	return ret
 }
 
 @CompileStatic
-Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long now,Long mnt,Map tv2,Map cLO){
-	return trigger ? v1:
-		( pCnt>i1 ? ( longEvalExpr(r9,mevaluateOperand(r9,ro2,null,false,true,v2),sDTIME)-getMidnightTime(r9,now)+getMidnightTime(r9,v2)
-						+ (tv2!=null ? longEvalExpr(r9,rtnMap1(tv2)) :lZ)
-					)
-				: sMv(cLO)==sTIME ? mnt:v1
+Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long mnt,Map tv2,Map cLO){
+	//Boolean lge=isDbg(r9) && isEric(r9)
+	//if(lge)
+	//	myDetail r9,"evalRO2: ro2: $ro2 v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2", i1
+	Long ret= trigger ? v1:
+		( pCnt>i1 ? (
+			longEvalExpr(r9,mevaluateOperand(r9,ro2,null,false,true,v2),sTIME)+getMidnightTime(r9,v2)
+				+ (tv2!=null ? longEvalExpr(r9,rtnMap1(tv2)) :lZ)
+			)
+			: sMv(cLO)==sTIME ? mnt:v1
 		)
+	//if(lge)
+	//	myDetail r9,"evalRO2: v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2 ret: $ret rets: ${formatLocalTime(r9,ret)}"
+	return ret
 }
 
 @CompileStatic
@@ -4945,14 +4958,14 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 	Boolean lg=isDbg(r9)
 	Boolean lge=lg && isEric(r9)
 	if(lge){
-		mySt='scheduleTimeCondition'
+		mySt='scheduleTimeCondition '
 		myDetail r9,mySt,i1
 	}
 	Integer cndNm=stmtNum(cndtn)
 	//if already scheduled once during run, don't do it again
 	String i=sI; Integer iz=iZ // compiler bug
 	if(sgtSch(r9).find{ Map it -> iMsS(it)==cndNm && iMs(it,i)==iz }){
-		if(lge)myDetail r9,mySt+' FOUND EXISTING TIMER '
+		if(lge)myDetail r9,mySt+'FOUND EXISTING TIMER '
 		return
 	}
 	String co=sMs(cndtn,sCO)
@@ -4976,57 +4989,71 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 	ro=mMs(cndtn,sRO)
 	tv1=ro!=null && sMt(ro)!=sC ? mevaluateOperand(r9,mMs(cndtn,sTO)):null // offset1
 	Boolean roHasPreset= hasPreset(ro)
-	v1= evalRO1(r9,ro,now,now,tv1)
+	v1= evalRO1(r9,ro,now,tv1)
+	if(lge && roHasPreset)myDetail r9,mySt+"found preset in ro", iN2
 
 	ro2=mMs(cndtn,sRO2)
 	tv2=ro2!=null && sMt(ro2)!=sC && pCnt>i1 ? mevaluateOperand(r9,mMs(cndtn,sTO2)):null // offset2
 	Boolean ro2HasPreset= hasPreset(ro2)
-	v2= evalRO2(r9,trigger,pCnt,v1,now,ro2,now,getMidnightTime(r9,now),tv2,cLO)
+	v2= evalRO2(r9,trigger,pCnt,v1,now,ro2,getMidnightTime(r9,now),tv2,cLO)
+	if(lge && ro2HasPreset)myDetail r9,mySt+"found preset in ro2", iN2
 
 	n=Math.round(d1*now+2000L)
 	if(sMv(cLO)==sTIME){
 		Long tempv; tempv= v1
 		v1=pushTimeAhead(r9,v1,n,!roHasPreset)
-		if(roHasPreset && tempv!=v1)
-			v1= evalRO1(r9,ro,now,v1,tv1)
-		tempv= v2
-		v2=pushTimeAhead(r9,v2,n,!ro2HasPreset)
-		if(ro2HasPreset && tempv!=v2)
-			v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,now,v2,tv2,cLO)
+		if(roHasPreset && tempv!=v1){
+			v1= evalRO1(r9,ro,v1,tv1)
+			v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+		}else{
+			tempv= v2
+			v2=pushTimeAhead(r9,v2,n,!ro2HasPreset)
+			if(ro2HasPreset && tempv!=v2)
+				v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+		}
 	}
 
+	//if(lge)myDetail r9,mySt+"BEFORE n: $n v1: $v1 v2: $v2",iN2
 	//figure out the next time
 	v1=v1<n ? v2:v1
 	v2=v2<n ? v1:v2
 	n=v1<v2 ? v1:v2
+	//if(lge)myDetail r9,mySt+"AFTER n: $n v1: $v1 v2: $v2",iN2
 
 	Long origN=n
 	n1=n
 	if(sMv(cLO)==sTIME && trigger){
 		Integer iyr=1461 // 4 years
 		Integer v; v=iyr
-		if(lge)warn mySt+" checking for schedule restrictions for $cLO",r9
+		if(lge)myDetail r9,mySt+"checking for schedule restrictions for $cLO",iN2
 		Long n2
 		while(v>iZ){
 			//repeat until we find a day that's matching the restrictions
-			if(checkTimeRestrictions(r9,cLO,n1,i5,i1)==lZ) break
+			Long t= checkTimeRestrictions(r9,cLO,n1,i5,i1)
+			if(lge)myDetail r9,mySt+"checkTimeRestrisions returned $t",iN2
+			if(t==lZ) break
 			// deal with sunrise sunset future calculations
 			if(roHasPreset || ro2HasPreset){
 				n=Math.round(d1*n1+2000L)
 
 				Long tempv; tempv= v1
 				v1=pushTimeAhead(r9,v1,n,!roHasPreset)
-				if(roHasPreset && tempv!=v1)
-					v1= evalRO1(r9,ro,now,v1,tv1)
-				tempv= v2
-				v2=pushTimeAhead(r9,v2,n,!ro2HasPreset)
-				if(ro2HasPreset && tempv!=v2)
-					v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,now,v2,tv2,cLO)
+				if(roHasPreset && tempv!=v1) {
+					v1= evalRO1(r9,ro,v1,tv1)
+					v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+				}else {
+					tempv= v2
+					v2= pushTimeAhead(r9,v2,n,!ro2HasPreset)
+					if(ro2HasPreset && tempv != v2)
+						v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+				}
 				//figure out the next time
-				v1=v1<n ? v2:v1
-				v2=v2<n ? v1:v2
+	//			if(lge)myDetail r9,mySt+"BEFORE n: $n v1: $v1 v2: $v2 n1: $n1",iN2
+				v1=v1<n1 ? v2:v1
+				v2=v2<n1 ? v1:v2
 				n2=v1<v2 ? v1:v2
 				n1= n2
+	//			if(lge)myDetail r9,mySt+"AFTER n: $n v1: $v1 v2: $v2 n1: $n1",iN2
 			}else
 				n1=pushTimeAhead(r9,n1,n1+l1)
 			v-=i1
@@ -7301,7 +7328,7 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 	myS=sBLK
 	Boolean lge=isEric(r9)
 	if(lge){
-		myS="evaluateOperand: "+sffwdng(r9)+"$oper "
+		myS="evaluateOperand: "+sffwdng(r9)+"trigger: $trigger dayBasis: $dayBasis oper: $oper "
 		myDetail r9,myS,i1
 	}
 	List<LinkedHashMap> vals; vals=[]
@@ -10263,8 +10290,7 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 	if(!express)return rtnMapE('Null expression')
 	Long time=wnow()
 	Map expression=simplifyExpression(express)
-	String mySt
-	mySt=sNL
+	String mySt; mySt=sNL
 	Boolean lge=isEric(r9)
 	if(lge){
 		mySt="evaluateExpression $expression rtndataType: $rtndataType".toString()
@@ -10358,8 +10384,7 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 		case sFUNC:
 			String fn=sMs(expression,sN)
 			//in a function, we look for device parameter,they may be lists- we need to reformat all parameter to send them to the function
-			String myStr
-			myStr=sNL
+			String myStr; myStr=sNL
 			try{
 				List prms=[]
 				List<Map> t0=liMs(expression,sI)
@@ -12727,6 +12752,7 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 @CompileStatic
 private Long elapseT(Long t,Long n=wnow()){ return Math.round(d1*n-t) }
 
+@CompileStatic
 private ZonedDateTime utcToLocalDate(Map r9,dateOrTimeOrString=null){
 	def mdate=dateOrTimeOrString
 	Long ldate
@@ -12744,6 +12770,7 @@ private ZonedDateTime utcToLocalDate(Map r9,dateOrTimeOrString=null){
 	return localDate(r9,ldate)
 }
 
+@CompileStatic
 private ZonedDateTime localDate(Map r9, Long n=wnow()){
 	Long t; t= n ?: wnow()
 	ZonedDateTime zdt = Instant.ofEpochMilli(t)
@@ -13063,6 +13090,7 @@ private static List<Integer> hexToHsl(String hex){
 /** DEBUG FUNCTIONS					**/
 /**							**/
 
+@CompileStatic
 private void myDetail(Map r9,String msg,Integer shift=iN1){ log(msg,r9,shift,null,sWARN,true,false) }
 
 @CompileStatic
@@ -13336,28 +13364,39 @@ private Map initSunrSunst(Map r9){
 
 private Long getNextSunriseTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'tomorrowssunrise') }
 private Long getNextSunsetTime(Map r9){ Map st=initSunrSunst(r9); return lMs(st,'tomorrowssunset') }
-private Long getSunriseTime(Map r9,Long dayBasis=null){
-	if(dayBasis){
-		return calcSunTime(r9,sSUNRISE,dayBasis)
-	}else{
-		Map st=initSunrSunst(r9); return lMs(st,sSUNRISE)
-	}
-}
+private Long getSunriseTime(Map r9,Long dayBasis=null){ commonSunTime(r9,sSUNRISE,dayBasis) }
 
-private Long getSunsetTime(Map r9,Long dayBasis=null){
+private Long getSunsetTime(Map r9,Long dayBasis=null){ commonSunTime(r9,sSUNSET,dayBasis) }
+
+@CompileStatic
+private Long commonSunTime(Map r9,String tvar,Long dayBasis=null){
+//	Boolean lge=isDbg(r9) && isEric(r9)
+//	String myS; myS=sNL
+//	if(lge){
+//		myS='get'+tvar.capitalize()+'Time: '
+//		myDetail r9,myS+"${dayBasis} ${dayBasis ? formatLocalTime(r9,dayBasis): ""}",i1
+//	}
+	ZonedDateTime zdt,nzdt
+	Long res
 	if(dayBasis){
-		return calcSunTime(r9,sSUNSET,dayBasis)
+		res= calcSunTime(r9,tvar,dayBasis)
 	}else{
-		Map st=initSunrSunst(r9); return lMs(st,sSUNSET)
+		Map st=initSunrSunst(r9); res= lMs(st,tvar)
 	}
+//	if(lge)
+//		myDetail r9,myS+"${res} ${res ? formatLocalTime(r9,res): ""}"
+	return res
 }
 
 Long calcSunTime(Map r9,String typ,Long time){
 	Long res
 	String m; m=sNL
-	ZonedDateTime zdt,nzdt
 	Long now= wnow()
 	Long t; t= time ?: now
+	Boolean lge=isDbg(r9) && isEric(r9)
+	//if(lge)
+	//	myDetail r9,"calcSunTime: ${typ} time: $time now: $now nows: ${formatLocalTime(r9,now)} t: ${formatLocalTime(r9,t)}",iN2
+	ZonedDateTime zdt,nzdt
 	zdt= localDate(r9,t)
 	// strip the time to midnight of the day in question
 	nzdt= zdt.withNano(iZ)
@@ -13408,11 +13447,12 @@ Long calcSunTime(Map r9,String typ,Long time){
 			}
 		}
 	}
-	if(isDbg(r9) && isEric(r9))
+	if(lge)
 		myDetail r9,"calcSunTime: ${m} result: $res ${formatLocalTime(r9,res)}",iN2
 	return res
 }
 
+@CompileStatic
 private Boolean loadTZs(Map r9,String id){
 	try{
 		TimeZone ntz= loadTZ(id)
@@ -13424,7 +13464,7 @@ private Boolean loadTZs(Map r9,String id){
 			r9[sTZ]= ntz
 			r9[sZONEID]= nid
 			if(id && id!=TZID(mTZ())){
-				state[sTZ]= id
+				assignSt(sTZ,id)
 			}else{
 				wstateRemove(sTZ)
 			}
@@ -13462,6 +13502,7 @@ private static ZoneId loadZID(String zidS){
 	return  zid ?: myZone()
 }
 
+@CompileStatic
 private Long getMidnightTime(Map r9,Long time=null){
 	ZonedDateTime zdt,nzdt
 	Long t; t= time ?: wnow()
@@ -13477,6 +13518,8 @@ private Long getNextMidnightTime(Map r9,Long time=null){
 	Long t= getMidnightTime(r9,time)
 	return pushTimeAhead(r9,t,t+1L)
 }
+
+@CompileStatic
 private Long getNoonTime(Map r9,Long time=null){
 	ZonedDateTime zdt,nzdt
 	Long t; t= time ?: wnow()
