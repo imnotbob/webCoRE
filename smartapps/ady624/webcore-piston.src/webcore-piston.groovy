@@ -13448,7 +13448,7 @@ Long calcSunTime(Map r9,String typ,Long time){
 		}
 	}
 	if(lge)
-		myDetail r9,"calcSunTime: ${m} result: $res ${formatLocalTime(r9,res)}",iN2
+		myDetail r9,"calcSunTime: ${typ} ${m} result: $res ${formatLocalTime(r9,res)}",iN2
 	return res
 }
 

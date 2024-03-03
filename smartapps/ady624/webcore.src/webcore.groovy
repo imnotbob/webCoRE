@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update February 24, 2024 for Hubitat
+ * Last update March 2, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - February 24, 2024'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - March 2, 2024'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -6292,7 +6292,7 @@ def pageDumpExecution(){
 	List<Map> b= wgetChildApps().findAll{ (String)it.name==n }.sort{ (String)it.label }.collect{
 		String pid=hashPID(it.id)
 		Map a= p_executionFLD[wName][pid] ?: [:]
-		[ (sID): pid, (sNM): normalizeLabel(it), (c): a.cnt, (t): a.tot  ]
+		[ (sID): pid, (sNM): normalizeLabel(it), (c): a[c], (t): a[t]  ]
 	}
 	LinkedHashMap<String,Map> a; a=[:]
 	b.sort{ Map bb -> (bb[c]!= null ? -(Long)bb[c] : bb[c]) }.each { Map it ->
