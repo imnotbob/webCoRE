@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update March 2, 2024 for Hubitat
+ * Last update March 5, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -4928,10 +4928,10 @@ Long evalRO1(Map r9,Map ro,Long t,Map tv1){
 	//Boolean lge=isDbg(r9) && isEric(r9)
 	//if(lge)
 	//	myDetail r9,"evalRO1: ro: $ro t: $t tv1: $tv1", i1
-	Long ret= ( longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,false,t),sTIME)+getMidnightTime(r9,t) )
-			+ (tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ)
+	Long ret= ( longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,false,t),sTIME)+getMidnightTime(r9,t) ) +
+			(tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ)
 	//if(lge)
-	//	myDetail r9,"evalRO1: t: $t tv1: $tv1 ret: $ret"
+	//	myDetail r9,"evalRO1: t: $t tv1: $tv1 ret: $ret rets: ${formatLocalTime(r9,ret)}"
 	return ret
 }
 
@@ -4939,12 +4939,11 @@ Long evalRO1(Map r9,Map ro,Long t,Map tv1){
 Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long mnt,Map tv2,Map cLO){
 	//Boolean lge=isDbg(r9) && isEric(r9)
 	//if(lge)
-	//	myDetail r9,"evalRO2: ro2: $ro2 v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2", i1
+	//	myDetail r9,"evalRO2: trigger: $trigger pCnt: $pCnt ro2: $ro2 v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2", i1
 	Long ret= trigger ? v1:
 		( pCnt>i1 ? (
-			longEvalExpr(r9,mevaluateOperand(r9,ro2,null,false,true,v2),sTIME)+getMidnightTime(r9,v2)
-				+ (tv2!=null ? longEvalExpr(r9,rtnMap1(tv2)) :lZ)
-			)
+			longEvalExpr(r9,mevaluateOperand(r9,ro2,null,false,true,v2),sTIME)+getMidnightTime(r9,v2) +
+					(tv2!=null ? longEvalExpr(r9,rtnMap1(tv2)) :lZ) )
 			: sMv(cLO)==sTIME ? mnt:v1
 		)
 	//if(lge)
