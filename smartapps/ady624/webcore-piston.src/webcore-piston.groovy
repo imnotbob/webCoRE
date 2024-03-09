@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update March 5, 2024 for Hubitat
+ * Last update March 8, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -2160,6 +2160,7 @@ private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queu
 			if(lastSemaphore==lZ || tt1-lastSemaphore>100000L){
 				theSemaphoresVFLD[mSmaNm]=tt1
 				theSemaphoresVFLD=theSemaphoresVFLD
+				mb()
 				semaphoreName=mSmaNm
 				semaphoreDelay=waited ? tt1-startTime:lZ
 				r_semaphore=tt1
@@ -2177,6 +2178,7 @@ private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queu
 						evtQ.push(mEvt)
 						theQueuesVFLD[mSmaNm]=evtQ
 						theQueuesVFLD=theQueuesVFLD
+						mb()
 						didQ=true
 					}
 				}
@@ -3109,12 +3111,14 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	while(doSerialization && mSmaNm!=sNL){
 		getTheLock(mSmaNm,sHNDLEVT+s2)
 		List<Map> evtQ
+		mb()
 		evtQ=theQueuesVFLD[mSmaNm]
 		if(!evtQ){
 			if(theSemaphoresVFLD[mSmaNm]<=lS){
 				if(lg>i2)msgt='Released Lock and exiting'
 				theSemaphoresVFLD[mSmaNm]=lZ
 				theSemaphoresVFLD=theSemaphoresVFLD
+				mb()
 			}
 			releaseTheLock(mSmaNm)
 			break
@@ -3126,6 +3130,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			Integer qsize=evtList.size()
 			theQueuesVFLD[mSmaNm]=evtList
 			theQueuesVFLD=theQueuesVFLD
+			mb()
 			releaseTheLock(mSmaNm)
 
 			if(qsize>i8)error "large queue size ${qsize}".toString(),null
@@ -3200,6 +3205,7 @@ private Boolean executeEvent(Map r9,Map event){
 	String myS; myS=sNL
 	// see fixEvt for description of event
 	String evntName=sMs(event,sNM)
+	Boolean lgt=isTrc(r9)
 	Boolean lg=isDbg(r9)
 	Boolean lge=lg && isEric(r9)
 	if(lge){
@@ -3342,7 +3348,7 @@ private Boolean executeEvent(Map r9,Map event){
 									}
 								}
 							}else
-								if(lg)debug 'Piston device timer execution aborted due to restrictions in effect',r9
+								if(lgt)trace 'Piston device timer execution aborted due to restrictions in effect',r9
 						}
 						r9[sDID3OR5]=true
 						break
@@ -3365,7 +3371,7 @@ private Boolean executeEvent(Map r9,Map event){
 								r9.remove(sCURACTN)
 							}
 						}else
-							if(lg)debug 'Piston repeat task timer execution aborted due to restrictions in effect',r9
+							if(lgt)trace 'Piston repeat task timer execution aborted due to restrictions in effect',r9
 						r9[sDID3OR5]=true
 						break
 
@@ -3379,7 +3385,7 @@ private Boolean executeEvent(Map r9,Map event){
 				}
 
 			}else{
-				if(lg)debug 'Piston execution aborted due to restrictions in effect; updating piston states',r9
+				if(lgt)trace 'Piston execution aborted due to restrictions in effect; updating piston states',r9
 				//run through all to update stuff
 				r9[sCACHE]=[:] // reset device cache followed by
 				stNeedUpdate()
@@ -3806,6 +3812,7 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 	//if r9.ffTo is a positive non-zero number, we need to fast forward through all branches
 	//until we locate statement with a matching id, then we continue
 	if(statement==null)return false
+	Boolean lgt=isTrc(r9)
 	Boolean lg=isDbg(r9)
 	Integer stmtNm=stmtNum(statement)
 	Boolean cchg=bIs(r9,sCNDTNSTC)
@@ -3959,11 +3966,11 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 							((Map)r9[sSTACK])[sC]=stmtNm
 							// note we can end ffwding in the timer block on scheduled task
 							executeStatements(r9,liMs(statement,sS),async)
-						}else if(ownEvent && !canR && lg)debug 'Piston Every timer execution aborted due to restrictions in effect',r9
+						}else if(ownEvent && !canR && lgt)trace 'Piston Every timer execution aborted due to restrictions in effect',r9
 						//if we wanted to / ran any timer block statements, exit
 						if(prun(r9) || ownEvent){
 							r9[sTERM]=true
-							if(lg)debug "Exiting piston at end of Every timer block",r9
+							if(lgt)trace "Exiting piston at end of Every timer block",r9
 						}
 						value=false
 						break
@@ -4924,30 +4931,49 @@ private static Long pushTimeAhead(Map r9,Long pastTime,Long curTime, Boolean dst
 }
 
 @CompileStatic
-Long evalRO1(Map r9,Map ro,Long t,Map tv1){
-	//Boolean lge=isDbg(r9) && isEric(r9)
-	//if(lge)
-	//	myDetail r9,"evalRO1: ro: $ro t: $t tv1: $tv1", i1
-	Long ret= ( longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,false,t),sTIME)+getMidnightTime(r9,t) ) +
-			(tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ)
-	//if(lge)
-	//	myDetail r9,"evalRO1: t: $t tv1: $tv1 ret: $ret rets: ${formatLocalTime(r9,ret)}"
+Long evalRO1(Map r9,Map iro,Long t,Map tv1,Boolean nextMidN=false){
+	Boolean lge=isDbg(r9) && isEric(r9)
+	if(lge)
+		myDetail r9,"evalRO1: ro: $iro t: $t tv1: $tv1", i1
+	Map ro= [:]+iro
+	Boolean roHasPreset= hasPreset(ro)
+	String ty; ty= sTIME
+	if(roHasPreset && ro[sVT]==sTIME){
+		ty= sDTIME
+		ro[sVT]= ty
+	}
+	Long t1; t1= longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,nextMidN,t),ty) + (ty!=sDTIME ? getMidnightTime(r9,t) : lZ)
+	Long offset= tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ
+	Long tzadjust; tzadjust= lZ
+	if(!roHasPreset){
+		TimeZone mtz=rTZ(r9)
+		Long to= t1+offset
+		Long pTime= Math.min(t1,to)
+		Long fTime= Math.max(t1,to)
+		tzadjust= mtz.getOffset(pTime)-mtz.getOffset(fTime)
+	}
+	Long ret= t1+tzadjust+offset
+	if(lge)
+		myDetail r9,"evalRO1: t: $t tv1: $tv1 ret: $ret rets: ${formatLocalTime(r9,ret)}"
 	return ret
 }
 
 @CompileStatic
 Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long mnt,Map tv2,Map cLO){
-	//Boolean lge=isDbg(r9) && isEric(r9)
-	//if(lge)
-	//	myDetail r9,"evalRO2: trigger: $trigger pCnt: $pCnt ro2: $ro2 v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2", i1
-	Long ret= trigger ? v1:
-		( pCnt>i1 ? (
-			longEvalExpr(r9,mevaluateOperand(r9,ro2,null,false,true,v2),sTIME)+getMidnightTime(r9,v2) +
-					(tv2!=null ? longEvalExpr(r9,rtnMap1(tv2)) :lZ) )
-			: sMv(cLO)==sTIME ? mnt:v1
-		)
-	//if(lge)
-	//	myDetail r9,"evalRO2: v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2 ret: $ret rets: ${formatLocalTime(r9,ret)}"
+	Boolean lge=isDbg(r9) && isEric(r9)
+	if(lge)
+		myDetail r9,"evalRO2: trigger: $trigger pCnt: $pCnt ro2: $ro2 v1: $v1 v2: $v2 tv2: $tv2", i1
+	Long ret
+	if(trigger) ret=v1
+	else{
+		if(pCnt>i1){
+			ret= evalRO1(r9,ro2,v2,tv2,true)
+		}else{
+			ret= sMv(cLO)==sTIME ? mnt:v1
+		}
+	}
+	if(lge)
+		myDetail r9,"evalRO2: v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2 ret: $ret rets: ${formatLocalTime(r9,ret)}"
 	return ret
 }
 
@@ -8450,6 +8476,7 @@ private void updateCacheFld(Map r9,String nm,v,String s,Boolean gm){
 			nc[nm]=v
 			theCacheVFLD[id]=nc
 			theCacheVFLD=theCacheVFLD
+			mb()
 		}
 		releaseTheLock(mSmaNm)
 	}
