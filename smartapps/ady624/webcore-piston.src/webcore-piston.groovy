@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update March 8, 2024 for Hubitat
+ * Last update March 9, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -2831,6 +2831,10 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 
 	if(pause || resume){
 		Map nrtD
+		if(lg!=iZ){
+			msg[sM]='Event queued'
+			info msg,tmpRtD
+		}
 		updateLogs(tmpRtD)
 		if(resume){
 			nrtD=resumeP()
@@ -2896,15 +2900,15 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	Long t1=le-lMs(r9,sLSTART)
 	Long t2=lMs(r9,sGENIN)
 	Long t3=lMs(r9,sPEND)-lMs(r9,sPSTART)
-	Long missing=t0-t1-t2
 	r9[sCURS]=[(sI):t0.toInteger(),(sL):t1.toInteger(),(sR):t2.toInteger(),(sP):t3.toInteger(),(sS):stAccess.toInteger()] as LinkedHashMap
 	if(lg>i1){
+		Long missing=t0-t1-t2-stAccess
 		Long t4=le-startTime
 		Long t5=theend-le
-		if(lg>i2)debug "RunTime initialize > ${t0} LockT > ${t1}ms > r9T > ${t2}ms > pistonT > ${t3}ms (first state access ${stAccess} m:${missing} $t4 $t5)".toString(),r9
-		String adMsg; adMsg=sBLK
-		if(eric())adMsg=" (Init:$t0, Lock: $t1, pistonT $t3 first state access $stAccess m: $missing ($t4 $t5)".toString()
-		trace "Runtime (${"$r9".size()} bytes) initialized in ${t2}ms (${sHVER})".toString()+adMsg,r9
+		String Msg= "Runtime (${"$r9".size()} bytes) initialized ".toString()
+		String adMsg= lg>i2 || eric() ? "${t0} LockT > ${t1}ms > r9T > ${t2}ms > pistonT > ${t3}ms (first state access ${stAccess} m:${missing} $t4 $t5)".toString() : sBLK
+		if(lg>i2)debug Msg+adMsg+" (${sHVER})".toString(),r9
+		else trace Msg+"in ${t1+t2+t3}ms (${sHVER}) ".toString()+adMsg,r9
 	}
 	for(String foo in cleanData1) r9.remove(foo)
 
@@ -3601,7 +3605,7 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 	List<Map> schedules,ts
 	schedules=sgetSchedules(sPROCS,myPep)
 	ts=[]+schedules
-	Boolean lg=isInf(r9)
+	Boolean lg=isTrc(r9)
 
 	if(ts){
 		Map cncls=mMs(r9,sCNCLATNS)
@@ -3666,7 +3670,7 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 			t=nextT-wnow()
 			t=(t<sVariance ? sVariance:t)
 			wrunInMillis(t,sTIMHNDR,[(sDATA): tnext])
-			if(isInf(r9))info 'Setting up scheduled job for '+formatLocalTime(r9,nextT)+' (in '+t.toString()+'ms)'+(ssz>i1 ? ',with '+(ssz-i1).toString()+' more job'+(ssz>i2 ? sS:sBLK)+' pending':sBLK),r9
+			if(isInf(r9))info 'Setting up scheduled job for '+formatLocalTime(r9,nextT)+' (in '+t.toString()+'ms)'+(ssz>i1 ? ', with '+(ssz-i1).toString()+' more job'+(ssz>i2 ? sS:sBLK)+' pending':sBLK),r9
 		}
 		if(nextT==lZ){
 			if(lMs(r9,sNSCH)!=lZ)wunschedule(sTIMHNDR)
@@ -4651,8 +4655,9 @@ private static void pcmd(device,String cmd,List nprms=[]){
 @CompileStatic
 private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	Boolean lg=isDbg(r9)
+	Boolean lgt=isTrc(r9)
 	Boolean lge=lg && isEric(r9)
-	String mySt,mySt1; mySt=sNL; mySt1= lg ? 'scheduleTimer ': sNL
+	String mySt,mySt1; mySt=sBLK; mySt1= lgt ? 'scheduleTimer ': sNL
 	Integer iTD=stmtNum(timer)
 	Map tlo=mMs(timer,sLO)
 	Map tlo2=mMs(timer,sLO2)
@@ -4874,7 +4879,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 
 	if(nxtSchd>lastR){
 		liMs(r9,sSCHS).removeAll{ Map it -> iMsS(it)==iTD }
-		String msg= lg ? mySt1+'Requesting ' + (cycles==iZ && lg ? 'interim ' : sBLK) +'every schedule':sNL
+		String msg= lgt ? mySt1+'Requesting ' + (cycles==iZ && lg ? 'interim ' : sBLK) +'every schedule':sNL
 		requestWakeUp(r9,timer,[(sDLR):iN1],nxtSchd,sNL,false,sNL,msg)
 	}
 	if(lge)myDetail r9,mySt1+mySt
@@ -4981,6 +4986,7 @@ Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long mn
 private void scheduleTimeCondition(Map r9,Map cndtn){
 	String mySt; mySt=sNL
 	Boolean lg=isDbg(r9)
+	Boolean lgt=isTrc(r9)
 	Boolean lge=lg && isEric(r9)
 	if(lge){
 		mySt='scheduleTimeCondition '
@@ -5088,7 +5094,7 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 	}
 
 	if(n1>wnow()){
-		String msg= lg ? "Requesting time schedule":sNL
+		String msg= lgt ? "Requesting time schedule":sNL
 		requestWakeUp(r9,cndtn,[(sDLR):iZ],n1,sNL,false,sNL,msg)
 	}
 	if(lge)myDetail r9,mySt
@@ -5327,7 +5333,7 @@ private void requestWakeUp(Map r9,Map statement,Map task,Long timeOrDelay,String
 	spshSch(r9,mmschedule)
 	if(msg||tmsg){
 		String s= wakeS(r9,sBLK,mmschedule)
-		if(msg)debug msg+s,r9 else trace tmsg+s,r9
+		if(msg)trace msg+s,r9 else trace tmsg+s,r9
 	}
 }
 
@@ -5996,7 +6002,7 @@ void qrunRepeat(Map r9,Long dur,Map jq){
 		(sPS):svPS(statement),
 		('jq'):jq1,
 	]
-	if(isEric(r9))trace wakeS(r9,'Requesting a repeat task',schedule),r9
+	if(isTrc(r9))trace wakeS(r9,'Requesting a repeat task',schedule),r9
 	spshSch(r9,schedule)
 }
 
@@ -7178,6 +7184,7 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 	String myS; myS=sBLK
 	Integer myC=stmtNum(cndtns)
 	Boolean lg=isDbg(r9)
+	Boolean lgt=isTrc(r9)
 	Boolean lge=lg && isEric(r9)
 	if(lge){
 		String s,s1
@@ -7247,14 +7254,14 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 					ladderUpdated=t
 					cancelStatementSchedules(r9,myC)
 					String ms; ms=sBLK
-					if(lg)ms="Condition group #${myC} made progress up the ladder; currently at step $ladderIndex of $steps"
+					if(lg)ms="Condition group #${myC} made progress up the ladder; currently at step $ladderIndex of $steps, "
 					if(ladderIndex<steps){
 						//delay decision, there are more steps to go through
 						value=null
 						cndtn=cndtnsCOL[ladderIndex]
 						Map tv=mevaluateOperand(r9,mMs(cndtn,sWD))
 						duration=longEvalExpr(r9,rtnMap1(tv))
-						if(lg)ms+=", Requesting timed"
+						if(lgt)ms+="Requesting timed"
 						requestWakeUp(r9,cndtns,cndtns,duration,sNL,true,sNL,ms)
 					}else if(ms)debug ms,r9
 				}
@@ -7746,6 +7753,7 @@ void doStaysProcess(Map r9,List<Map>schedules,String co,Map cndtn,Integer cndNm,
 	Boolean isStaysUnchg= co==sSTAYUNCH
 	Boolean isStays=co.startsWith(sSTAYS)
 	Boolean lg=isDbg(r9)
+	Boolean lgt=isTrc(r9)
 	String s; s=sBLK
 	String d=sD
 	if(isStays && result){
@@ -7753,7 +7761,7 @@ void doStaysProcess(Map r9,List<Map>schedules,String co,Map cndtn,Integer cndNm,
 		if(lg)s= dev ? " $co match in list":" $co result $result"
 		if(!schedules.find{ Map it -> iMsS(it)==cndNm && (!dev || sMs(it,d)==dev) }){
 			//schedule a wake up if there's none otherwise just move on
-			if(lg)s+= " scheduling timer "
+			if(lgt)s+= " scheduling timer "
 			schd=true
 		}else s+= " found timer "
 	}else{ // the comparison failed, normally cancel except for stays_unchanged
@@ -7761,7 +7769,7 @@ void doStaysProcess(Map r9,List<Map>schedules,String co,Map cndtn,Integer cndNm,
 		if(isStaysUnchg){
 			if(lg)s+= " $co result $result (it changed)"
 			if(!schedules.find{ Map it -> iMsS(it)==cndNm && (!dev || sMs(it,d)==dev) }){
-				if(lg)s+= " no timer found creating timer "
+				if(lgt)s+= " no timer found creating timer "
 				schd=true
 			}else{
 				if(lg)s+= " with timer active, cancel timer and create new timer"
@@ -7770,20 +7778,20 @@ void doStaysProcess(Map r9,List<Map>schedules,String co,Map cndtn,Integer cndNm,
 			}
 		}else{
 			//cancel any schedule
-			if(lg)s+= " cancel any timers "
+			if(lgt)s+= " cancel any timers "
 			canc=true
 		}
 	}
-	if(lg){
+	if(lgt){
 		String d1= dev ? "for device $dev ":sBLK
 		s="timed trigger schedule${s}${d1}for condition ${cndNm}"
 	}
 	if(canc){
-		if(lg)debug "Cancelling any $s",r9
+		if(lgt)trace "Cancel any $s",r9
 		cancelStatementSchedules(r9,cndNm,dev)
 	}
 	if(schd){
-		String msg= lg ? "Adding a "+s : sNL
+		String msg= lgt ? "Adding a "+s : sNL
 		requestWakeUp(r9,cndtn,cndtn,delay,dev,true,sNL,msg)
 	}
 	if(!schd && !canc){
@@ -7944,7 +7952,7 @@ private void whatCnclsA(Map r9){
 		Integer i=iMs(sch,sI)
 		if(i>iZ || i in ListIN35) s+= cnlS(sch)
 	}
-	if(s)info "Cancel ALL task schedules..."+s,r9
+	if(s)trace "Cancel ALL task schedules..."+s,r9
 }
 
 /** log what timers will be canceled due to piston state change from saved schedules */
@@ -7953,7 +7961,7 @@ private void whatCnclsP(Map r9){
 	String s; s=sBLK
 	for(Map sch in schedules)
 		if(iMs(sch,sPS)!=iZ) s+= cnlS(sch)
-	if(s)info "Cancel piston state changed schedules..."+s,r9
+	if(s)trace "Cancel piston state changed schedules..."+s,r9
 }
 
 /** log what statements timers will be canceled from saved schedules */
@@ -7962,7 +7970,7 @@ private void whatStatementsCncl(Map r9,Integer stmtId, String data=sNL){
 	String s; s=sBLK
 	for(Map sch in schedules)
 		if(stmtId==iMsS(sch) && (!data || data==sMs(sch,sD))) s+= cnlS(sch)
-	if(s)info "Cancelling statement #${stmtId}'s schedules..."+s,r9
+	if(s)trace "Cancel statement #${stmtId}'s schedules..."+s,r9
 }
 
 @CompileStatic
@@ -7973,7 +7981,7 @@ private void cancelStatementSchedules(Map r9,Integer stmtId,String data=sNL){
 		fnd=(stmtId==iMs(item,sID) && (!data || data==sMs(item,sDATA)))
 		if(fnd)break
 	}
-	if(isInf(r9))whatStatementsCncl(r9,stmtId,data)
+	if(isTrc(r9))whatStatementsCncl(r9,stmtId,data)
 	// if not already in list, add to list
 	if(!fnd) liMs(mMs(r9,sCNCLATNS),sSTMTS).push([(sID): stmtId,(sDATA): data])
 }
@@ -7984,13 +7992,13 @@ private void whatConditionsCncl(Map r9,Integer cndtnId){
 	String s; s=sBLK
 	for(Map sch in schedules)
 		if(cndtnId in (List)sch[sCS]) s+= cnlS(sch)
-	if(s)info "Cancelling condition #${cndtnId}'s schedules..."+s,r9
+	if(s)trace "Cancel condition #${cndtnId}'s schedules..."+s,r9
 }
 
 @CompileStatic
 private void cancelConditionSchedules(Map r9,Integer cndtnId){
 	//cancel all schedules that are pending for condition cndtnId
-	if(isInf(r9))whatConditionsCncl(r9,cndtnId)
+	if(isTrc(r9))whatConditionsCncl(r9,cndtnId)
 	if(!(cndtnId in (List<Integer>)mMs(r9,sCNCLATNS)[sCONDITIONS]))
 		((List<Integer>)mMs(r9,sCNCLATNS)[sCONDITIONS]).push(cndtnId)
 }
