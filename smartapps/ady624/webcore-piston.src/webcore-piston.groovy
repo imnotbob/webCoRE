@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update March 9, 2024 for Hubitat
+ * Last update March 10, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -1410,7 +1410,7 @@ private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Ma
 		sid=id.toString()
 		if(id==iZ || existingIds[sid]!=null) requiringIds.push(node)
 		else{
-			maxId=maxId<id ? id:maxId
+			maxId=Math.max(maxId,id)
 			existingIds[sid]=id
 		}
 		if(nodeT==sIF && node[sEI]){
@@ -1420,7 +1420,7 @@ private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Ma
 				sid=id.toString()
 				if(id==iZ || existingIds[sid]!=null) requiringIds.push(elseIf)
 				else{
-					maxId=maxId<id ? id:maxId
+					maxId=Math.max(maxId,id)
 					existingIds[sid]=id
 				}
 			}
@@ -1431,7 +1431,7 @@ private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Ma
 				sid=id.toString()
 				if(id==iZ || existingIds[sid]!=null) requiringIds.push(_case)
 				else{
-					maxId=maxId<id ? id:maxId
+					maxId=Math.max(maxId,id)
 					existingIds[sid]=id
 				}
 			}
@@ -1442,7 +1442,7 @@ private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Ma
 				sid=id.toString()
 				if(id==iZ || existingIds[sid]!=null) requiringIds.push(task)
 				else{
-					maxId=maxId<id ? id:maxId
+					maxId=Math.max(maxId,id)
 					existingIds[sid]=id
 				}
 			}
@@ -3668,7 +3668,7 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 			nextT=lMt(tnext)
 			Long sVariance=lMs(gtPLimits(),sSCHVARIANCE)
 			t=nextT-wnow()
-			t=(t<sVariance ? sVariance:t)
+			t=Math.max(t,sVariance)
 			wrunInMillis(t,sTIMHNDR,[(sDATA): tnext])
 			if(isInf(r9))info 'Setting up scheduled job for '+formatLocalTime(r9,nextT)+' (in '+t.toString()+'ms)'+(ssz>i1 ? ', with '+(ssz-i1).toString()+' more job'+(ssz>i2 ? sS:sBLK)+' pending':sBLK),r9
 		}
@@ -3909,8 +3909,7 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 						//look for else-if
 						if(statement[sEI]){
 							Integer tstmtNm=stmtNum(liMs(statement,sEI)[iZ])
-							String mySt1
-							mySt1=sNL
+							String mySt1; mySt1=sNL
 							if(lge){
 								mySt1=sEXST+("#${tstmtNm} "+sffwdng(r9)+'elseif'+sSPC+"async: $async").toString()
 								myDetail r9,mySt1,i1
@@ -4512,7 +4511,7 @@ private static Long cedIs(Map r9){
 	Long ced; ced= a ? a.toLong():lZ
 	if(ced>lZ){
 		Long t1=lMs(gtPLimits(),sDEVMAXDEL)
-		ced=ced>t1 ? t1:ced
+		ced=Math.min(ced,t1)
 	}
 	return ced
 }
@@ -4550,7 +4549,7 @@ private void executePhysicalCommand(Map r9,device,String command,prms=[],Long id
 			if(waitT>ced/i4){
 				Long t1=delay
 				ignRest=!willQ
-				delay=waitT>delay ? waitT:delay
+				delay= Math.max(waitT,delay)
 				scheduleDevice=scheduleDevice ?: hashD(r9,device)
 				willQ=true
 				if(doI && waitT>t1)s="Injecting command execution delay of ${waitT-t1}ms before [$device].$command() added schedule "
@@ -4598,7 +4597,7 @@ private void executePhysicalCommand(Map r9,device,String command,prms=[],Long id
 			String tailStr; tailStr=sNL
 			if(!canq && delay>lZ){
 				Long t1=lMs(gtPLimits(),sDEVMAXDEL)
-				delay=delay>t1 ? t1:delay
+				delay=Math.min(delay,t1)
 				doPause("PAUSE wait before device command: Waiting for ${delay}ms",delay,r9,true)
 				if(doI)tailStr="[delay: $delay])".toString()
 			}
@@ -4652,12 +4651,15 @@ private static void pcmd(device,String cmd,List nprms=[]){
 @Field static final String sOMY='omy'
 @Field static final String sOWM='owm'
 
+/**
+ * schedule EVERY timer
+ */
 @CompileStatic
 private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	Boolean lg=isDbg(r9)
 	Boolean lgt=isTrc(r9)
 	Boolean lge=lg && isEric(r9)
-	String mySt,mySt1; mySt=sBLK; mySt1= lgt ? 'scheduleTimer ': sNL
+	String mySt,mySt1; mySt=sBLK; mySt1= lg ? 'scheduleTimer ': sBLK
 	Integer iTD=stmtNum(timer)
 	Map tlo=mMs(timer,sLO)
 	Map tlo2=mMs(timer,sLO2)
@@ -4715,14 +4717,14 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	if(delta==lZ){ // [sD, sW, sN, sY]
 		hasPresetS= hasPreset(tlo2)
 		if(lge) myDetail r9,mySt1+"1 dtime: $dtime rightNow: $rightNow lastRun: $lastRun hasPreset: $hasPresetS",iN2
-		dtime= evalPresetMap(r9,tlo2,tlo3,rightNow,lge)
+		dtime= evalRO1(r9,tlo2,rightNow,tlo3,false)
 		// using sunrise,sunset presets, make sure in the future, without dst offsets
 		if(hasPresetS){
 			Long ndtime
 			ndtime= priorActivity ? pushTimeAhead(r9,dtime,lastRun,false) : pushTimeAhead(r9,dtime,rightNow,false)
 			if(ndtime!=dtime)
 				if(lge) myDetail r9,mySt1+"2 dtime: $dtime rightNow: $rightNow lastRun: $lastRun",iN2
-				dtime= evalPresetMap(r9,tlo2,tlo3,ndtime,lge)
+				dtime= evalRO1(r9,tlo2,ndtime,tlo3,false)
 		}
 		//if(lge) myDetail r9,mySt1+"3 dtime: $dtime rightNow: $rightNow lastRun: $lastRun",iN2
 		if(!priorActivity) dtime=pushTimeAhead(r9,dtime,rightNow,!hasPresetS) // first run
@@ -4852,7 +4854,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 			}
 			//if(lge) myDetail r9,mySt1+"13 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 			// if we have a sunrise/sunset preset, we need to get the sunrise/sunset as of the day we are evaulating in the future
-			nxtSchd= hasPresetS && svNxtSchd!=nxtSchd ? evalPresetMap(r9,tlo2,tlo3,nxtSchd,lge) : nxtSchd
+			nxtSchd= hasPresetS && svNxtSchd!=nxtSchd ? evalRO1(r9,tlo2,nxtSchd,tlo3,false) : nxtSchd
 		}
 		if(lge) myDetail r9,mySt1+"15 dtime: $dtime rightNow: $rightNow nxtSchd: $nxtSchd",iN2
 		//check to see if it fits the restrictions
@@ -4867,7 +4869,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 			if(offset>lZ){
 				//if(lge) myDetail r9,mySt1+"offset: $offset level: $level",iN2
 				nxtSchd=addTime(r9,nxtSchd,offset,level)
-				nxtSchd= hasPresetS ? evalPresetMap(r9,tlo2,tlo3,nxtSchd,lge) : nxtSchd
+				nxtSchd= hasPresetS ? evalRO1(r9,tlo2,nxtSchd,tlo3,false) : nxtSchd
 			}
 		}
 		dtime=nxtSchd
@@ -4885,27 +4887,11 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	if(lge)myDetail r9,mySt1+mySt
 }
 
-@CompileStatic
-Long evalPresetMap(Map r9, Map oper,Map operoffset,Long dayBasis,Boolean lge=false){
-	String mySt,mySt1; mySt=sNL; mySt1= lge ? 'evalPresetMap ': sNL
-	if(lge) mySt="oper: ${oper} operoffset:${operoffset} dayBasis: ${dayBasis} "
-	if(lge) myDetail r9,mySt1+mySt,i1
-	Long dtime
-	//let's get the at time and offset
-	dtime= longEvalExpr(r9,mevaluateOperand(r9,oper,null,false,false,dayBasis),sTIME)+getMidnightTime(r9,dayBasis)
-	if(sMt(oper)!=sC){
-		Map offset=mevaluateOperand(r9,operoffset)
-		dtime+=longEvalExpr(r9,rtnMap1(offset))
-	}
-	if(lge)myDetail r9,mySt1+mySt+"result: $dtime"
-	return dtime
-}
-
 /**
  * return true if operand has sunrise or sunset
  */
 @CompileStatic
-static Boolean hasPreset(Map oper){ return (oper && sMt(oper)==sS && sMs(oper,sS) in [sSUNSET,sSUNRISE]) }
+static Boolean hasPreset(Map oper){ return (oper && sMt(oper)==sS && sMs(oper,sS) in [sSUNSET,sSUNRISE,'midnight','noon']) }
 
 /**
  * Add time (mod DST)
@@ -4929,56 +4915,78 @@ private static Long pushTimeAhead(Map r9,Long pastTime,Long curTime, Boolean dst
 	TimeZone mtz=rTZ(r9)
 	while(retTime<curTime){
 		t0=Math.round(retTime+dMSDAY)
-		t1= dst ? Math.round( (t0+(mtz.getOffset(retTime)-mtz.getOffset(t0))) *d1) : t0
+		t1= dst ? t0+(mtz.getOffset(retTime)-mtz.getOffset(t0)) : t0
 		retTime=t1
 	}
 	return retTime
 }
 
+/**
+ * evaluate time request with optional offset request; deal with sunset
+ * @param iro - time map
+ * @param dayBasis - day bias to start
+ * @param operoffset - optional offset to time
+ * @return long of datetime this calculated to
+ */
 @CompileStatic
-Long evalRO1(Map r9,Map iro,Long t,Map tv1,Boolean nextMidN=false){
+Long evalRO1(Map r9,Map iro,Long dayBasis,Map operoffset,Boolean nextMidN=false){
 	Boolean lge=isDbg(r9) && isEric(r9)
-	if(lge)
-		myDetail r9,"evalRO1: ro: $iro t: $t tv1: $tv1", i1
+	String s; s=sNL
+	if(lge){
+		s= "evalRO1: ro: $iro dayBasis: $dayBasis operoffset: $operoffset"
+		myDetail r9,s,i1
+	}
 	Map ro= [:]+iro
 	Boolean roHasPreset= hasPreset(ro)
-	String ty; ty= sTIME
-	if(roHasPreset && ro[sVT]==sTIME){
+	String ty; ty= ro[sVT] ?: sTIME
+	if(roHasPreset && ro[sVT]==sTIME){ // sunrise or sunset is a dtime and never a time
 		ty= sDTIME
 		ro[sVT]= ty
 	}
-	Long t1; t1= longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,nextMidN,t),ty) + (ty!=sDTIME ? getMidnightTime(r9,t) : lZ)
-	Long offset= tv1!=null ? longEvalExpr(r9,rtnMap1(tv1)) : lZ
+	//let's get the at date/time/datetime and offset; this could be 10:00, or noon-10h, sunrise-5hr, midnight+10h, '4/1/2024, 8:00:00PM'
+	Long t1; t1= longEvalExpr(r9,mevaluateOperand(r9,ro,null,false,nextMidN,dayBasis),ty)
+	Long mn= getMidnightTime(r9,Math.max( (dayBasis ?: wnow()),t1))
+	if( !(ty in [sDTIME,sDATE])){ // make a datetime if not already
+		t1=addTime(r9,mn,t1,i5)
+	}
 	Long tzadjust; tzadjust= lZ
-	if(!roHasPreset){
+	Long offset; offset= lZ
+	if(sMt(ro)!=sC){
+		Map offsetMap= operoffset!=null ? mevaluateOperand(r9,operoffset) : null
+		offset= offsetMap!=null ? longEvalExpr(r9,rtnMap1(offsetMap)) : lZ
+	}
+	if(!roHasPreset && offset!=lZ){ // with offset, we may have crossed a dst change today...
 		TimeZone mtz=rTZ(r9)
 		Long to= t1+offset
-		Long pTime= Math.min(t1,to)
-		Long fTime= Math.max(t1,to)
-		tzadjust= mtz.getOffset(pTime)-mtz.getOffset(fTime)
+		Long pTime= Math.min(mn,to)
+		Long fTime= Math.max(mn,to)
+		tzadjust= (mtz.getOffset(pTime)-mtz.getOffset(fTime))
 	}
 	Long ret= t1+tzadjust+offset
 	if(lge)
-		myDetail r9,"evalRO1: t: $t tv1: $tv1 ret: $ret rets: ${formatLocalTime(r9,ret)}"
+		myDetail r9,s+" $ret rets: ${formatLocalTime(r9,ret)}"
 	return ret
 }
 
 @CompileStatic
-Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long mnt,Map tv2,Map cLO){
+Long evalRO2(Map r9,Boolean trigger,Integer pCnt,Long v1,Long v2,Map ro2,Long mnt,Map operoffset,Map cLO){
 	Boolean lge=isDbg(r9) && isEric(r9)
-	if(lge)
-		myDetail r9,"evalRO2: trigger: $trigger pCnt: $pCnt ro2: $ro2 v1: $v1 v2: $v2 tv2: $tv2", i1
+	String s; s=sNL
+	if(lge){
+		s= "evalRO2: trigger: $trigger pCnt: $pCnt ro2: $ro2 v1: $v1 v2: $v2 operoffset: $operoffset"
+		myDetail r9,s,i1
+	}
 	Long ret
 	if(trigger) ret=v1
 	else{
 		if(pCnt>i1){
-			ret= evalRO1(r9,ro2,v2,tv2,true)
+			ret= evalRO1(r9,ro2,v2,operoffset,true)
 		}else{
 			ret= sMv(cLO)==sTIME ? mnt:v1
 		}
 	}
 	if(lge)
-		myDetail r9,"evalRO2: v1: $v1 v2: $v2 ro2: $ro2 tv2: $tv2 ret: $ret rets: ${formatLocalTime(r9,ret)}"
+		myDetail r9,s+" ret: $ret rets: ${formatLocalTime(r9,ret)}"
 	return ret
 }
 
@@ -5013,34 +5021,29 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 	Map cLO=mMs(cndtn,sLO)
 
 	Long v1,v2,n,n1
-	Map tv1,tv2
 	Map ro,ro2
 
 	Long now= wnow()
 	ro=mMs(cndtn,sRO)
-	tv1=ro!=null && sMt(ro)!=sC ? mevaluateOperand(r9,mMs(cndtn,sTO)):null // offset1
 	Boolean roHasPreset= hasPreset(ro)
-	v1= evalRO1(r9,ro,now,tv1)
-	if(lge && roHasPreset)myDetail r9,mySt+"found preset in ro", iN2
+	v1= evalRO1(r9,ro,now,mMs(cndtn,sTO))
 
 	ro2=mMs(cndtn,sRO2)
-	tv2=ro2!=null && sMt(ro2)!=sC && pCnt>i1 ? mevaluateOperand(r9,mMs(cndtn,sTO2)):null // offset2
 	Boolean ro2HasPreset= hasPreset(ro2)
-	v2= evalRO2(r9,trigger,pCnt,v1,now,ro2,getMidnightTime(r9,now),tv2,cLO)
-	if(lge && ro2HasPreset)myDetail r9,mySt+"found preset in ro2", iN2
+	v2= evalRO2(r9,trigger,pCnt,v1,now,ro2,getMidnightTime(r9,now),mMs(cndtn,sTO2),cLO)
 
 	n=Math.round(d1*now+2000L)
 	if(sMv(cLO)==sTIME){
 		Long tempv; tempv= v1
 		v1=pushTimeAhead(r9,v1,n,!roHasPreset)
 		if(roHasPreset && tempv!=v1){
-			v1= evalRO1(r9,ro,v1,tv1)
-			v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+			v1= evalRO1(r9,ro,v1,mMs(cndtn,sTO))
+			v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,mMs(cndtn,sTO2),cLO)
 		}else{
 			tempv= v2
 			v2=pushTimeAhead(r9,v2,n,!ro2HasPreset)
 			if(ro2HasPreset && tempv!=v2)
-				v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+				v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,mMs(cndtn,sTO2),cLO)
 		}
 	}
 
@@ -5070,21 +5073,19 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 				Long tempv; tempv= v1
 				v1=pushTimeAhead(r9,v1,n,!roHasPreset)
 				if(roHasPreset && tempv!=v1) {
-					v1= evalRO1(r9,ro,v1,tv1)
-					v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+					v1= evalRO1(r9,ro,v1,mMs(cndtn,sTO))
+					v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,mMs(cndtn,sTO2),cLO)
 				}else {
 					tempv= v2
 					v2= pushTimeAhead(r9,v2,n,!ro2HasPreset)
 					if(ro2HasPreset && tempv != v2)
-						v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,tv2,cLO)
+						v2= evalRO2(r9,trigger,pCnt,v1,v2,ro2,v2,mMs(cndtn,sTO2),cLO)
 				}
 				//figure out the next time
-	//			if(lge)myDetail r9,mySt+"BEFORE n: $n v1: $v1 v2: $v2 n1: $n1",iN2
 				v1=v1<n1 ? v2:v1
 				v2=v2<n1 ? v1:v2
 				n2=v1<v2 ? v1:v2
 				n1= n2
-	//			if(lge)myDetail r9,mySt+"AFTER n: $n v1: $v1 v2: $v2 n1: $n1",iN2
 			}else
 				n1=pushTimeAhead(r9,n1,n1+l1)
 			v-=i1
@@ -6294,7 +6295,7 @@ private Long do_lifx(Map r9,String cmd,String path,Map body,Long duration,String
 		callHttp("asynchttp${cmd}".toString(),'ahttpRequestHandler',requestParams,[command:sLIFX,em: [(sT):c]])
 		Long ldur=duration ? Math.round(duration * d1000):lZ
 		Long l=11000L
-		return ldur>l ? ldur:l
+		return Math.max(ldur,l)
 	}catch(all){
 		error "Error while activating LIFX $c:",r9,iN2,all
 	}
@@ -9655,7 +9656,7 @@ private Map<String,Object> getJsonData(Map r9,data,String name,String feature=sN
 							args=sz>i4 ? largs[i4]:sBLK
 							continue
 						case 'sixth':
-							args=sz ? largs[i5]:sBLK
+							args=sz>i5 ? largs[i5]:sBLK
 							continue
 						case 'seventh':
 							args=sz>i6 ? largs[i6]:sBLK
@@ -13439,6 +13440,7 @@ Long calcSunTime(Map r9,String typ,Long time){
 	nzdt= nzdt.withHour(iZ)
 	Boolean sunset= typ==sSUNSET
 
+	//if(piston location is same as hub location) then
 	ZonedDateTime nnzdt; nnzdt= localDate(r9,now)
 	if(zdt.getYear()==nnzdt.getYear() && zdt.getMonth().getValue()==nnzdt.getMonth().getValue() && zdt.getDayOfMonth()==nnzdt.getDayOfMonth()){
 		if(sunset)
@@ -13458,14 +13460,6 @@ Long calcSunTime(Map r9,String typ,Long time){
 			try{
 				Date d= new Date(nzdt.toInstant().toEpochMilli())
 				Map sunTimes=app.getSunriseAndSunset([(sDATE):d]) // this only works for hub's location
-/*				Calendar calendar= Calendar.getInstance(rTZ(r9))
-				calendar.setTimeInMillis(nzdt.toInstant().toEpochMilli())
-				SolarTime solarTime= SolarTime.ofLocation(gtLlat().toDouble(), gtLlong().toDouble()) // this is only hub location
-				if(typ==sSUNSET)
-					res= solarTime.sunset(calendar)
-				else
-					res= solarTime.sunrise(calendar)
-*/
 				if(sunset)
 					res=((Date)sunTimes[sSUNSET]).getTime()
 				else
@@ -13481,6 +13475,15 @@ Long calcSunTime(Map r9,String typ,Long time){
 			}
 		}
 	}
+	// else piston location is set different than hub location
+/*				Calendar calendar= Calendar.getInstance(rTZ(r9))
+				calendar.setTimeInMillis(nzdt.toInstant().toEpochMilli())
+				SolarTime solarTime= SolarTime.ofLocation(gtLlat().toDouble(), gtLlong().toDouble()) // this is only hub location
+				if(typ==sSUNSET)
+					res= solarTime.sunset(calendar)
+				else
+					res= solarTime.sunrise(calendar)
+*/
 	if(lge)
 		myDetail r9,"calcSunTime: ${typ} ${m} result: $res ${formatLocalTime(r9,res)}",iN2
 	return res
