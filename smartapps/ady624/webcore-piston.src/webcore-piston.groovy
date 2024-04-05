@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update March 10, 2024 for Hubitat
+ * Last update April 3, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -7436,6 +7436,8 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 				case sPSTNRSM:
 				case 'cloudBackup':
 				case 'lowMemory':
+				case 'manualReboot':
+				case 'update':
 				case 'systemStart':
 				case 'severeLoad':
 				case 'zigbeeOff':

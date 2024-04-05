@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update March 10, 2024 for Hubitat
+ * Last update April 3, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - March 10, 2024'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - April 3, 2024'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -5240,20 +5240,20 @@ private static Map<String,Map> virtualCommands(){
 		waitRandom				: [ (sN): "Wait randomly...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Wait randomly between {0} and {1}",									(sP): [[(sN):"At least", (sT):sDUR],[(sN):"At most", (sT):sDUR]],	],
 		waitForTime				: [ (sN): "Wait for time...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Wait until {0}",													(sP): [[(sN):"Time", (sT):sTIME]],	],
 		waitForDateTime			: [ (sN): "Wait for date & time...",	(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Wait until {0}",													(sP): [[(sN):"Date & Time", (sT):sDTIME]],	],
-		executePiston			: [ (sN): "Execute piston...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Execute piston \"{0}\"{1}",											(sP): [[(sN):"Piston", (sT):"piston"], [(sN):"Arguments", (sT):"variables", (sD):" with arguments {v}"],[(sN):"Wait for execution", (sT):sBOOLN,(sD):" and wait for execution to finish",w:"webCoRE can only wait on piston executions of pistons within the same instance as the caller. Please note that global variables updated in the callee piston do NOT get reflected immediately in the caller piston, the new values will be available on the next run."]],	],
+		executePiston			: [ (sN): "Execute piston...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Execute piston \"{0}\"{1}{2}",									(sP): [[(sN):"Piston", (sT):"piston"], [(sN):"Arguments", (sT):"variables", (sD):" with arguments {v}"],[(sN):"Wait for execution", (sT):sBOOLN,(sD):" and wait for execution to finish",w:"webCoRE can only wait on piston executions of pistons within the same webCoRE instance as the caller. Please note that a) if the callee piston pauses, or waits, the caller piston will continue; b) global variables updated in the callee piston do NOT get reflected immediately in the caller piston, the new values will be available on the next run."]],	],
 		pausePiston				: [ (sN): "Pause piston...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Pause piston \"{0}\"",												(sP): [[(sN):"Piston", (sT):"piston"]],	],
 		resumePiston			: [ (sN): "Resume piston...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Resume piston \"{0}\"",												(sP): [[(sN):"Piston", (sT):"piston"]],	],
-		executeRule				: [ (sN): "Execute Rule...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Execute Rule \"{0}\" with action {1}",											(sP): [[(sN):"Rule", (sT):"rule"], [(sN):"Argument", (sT):sENUM, (sO):['Run','Stop','Pause','Resume','Evaluate','Set Boolean True','Set Boolean False']] ]	],
-		toggle					: [ (sN): "Toggle", (sR): [sON, sOFF],			(sI): sTOGON																				],
+		executeRule				: [ (sN): "Execute Rule...",			(sA): true,	(sI): sCLOCK, (is): sR,		(sD): "Execute Rule \"{0}\" with action {1}",								(sP): [[(sN):"Rule", (sT):"rule"], [(sN):"Argument", (sT):sENUM, (sO):['Run','Stop','Pause','Resume','Evaluate','Set Boolean True','Set Boolean False']] ]	],
+		toggle					: [ (sN): "Toggle", (sR): [sON, sOFF],				(sI): sTOGON																				],
 		toggleRandom			: [ (sN): "Random toggle", (sR): [sON, sOFF],		(sI): sTOGON,				(sD): "Random toggle{0}",													(sP): [[(sN):"Probability for on", (sT):sLVL, (sD):" with a {v}% probability for on"]],	],
 		setSwitch				: [ (sN): "Set switch...", (sR): [sON, sOFF],		(sI): sTOGON,				(sD): "Set switch to {0}",													(sP): [[(sN):"Switch value", (sT):sSWITCH]],																],
-		setHSLColor				: [ (sN): "Set color... (hsl)",				(sI): "palette", (is): sL,			(sD): "Set color to H:{0}° / S:{1}% / L%:{2}{3}",				(sR): ["setColor"],				(sP): [[(sN):"Hue", (sT):"hue"], [(sN):"Saturation", (sT):"saturation"], [(sN):"Level", (sT):sLVL], [(sN):sONLYIFSWIS, (sT):sENUM,(sO):[sON,sOFF], (sD):sIFALREADY]],							],
-		toggleLevel				: [ (sN): "Toggle level...",				(sI): "toggle-off",					(sD): "Toggle level between 0% and {0}%",	(sR): [sON, sOFF, "setLevel"],	(sP): [[(sN):"Level", (sT):sLVL]],																																	],
+		setHSLColor				: [ (sN): "Set color... (hsl)",						(sI): "palette", (is): sL,			(sD): "Set color to H:{0}° / S:{1}% / L%:{2}{3}",				(sR): ["setColor"],				(sP): [[(sN):"Hue", (sT):"hue"], [(sN):"Saturation", (sT):"saturation"], [(sN):"Level", (sT):sLVL], [(sN):sONLYIFSWIS, (sT):sENUM,(sO):[sON,sOFF], (sD):sIFALREADY]],							],
+		toggleLevel				: [ (sN): "Toggle level...",						(sI): "toggle-off",					(sD): "Toggle level between 0% and {0}%",	(sR): [sON, sOFF, "setLevel"],	(sP): [[(sN):"Level", (sT):sLVL]],																																	],
 		sendNotification		: [ (sN): "Send notification...",		(sA): true,	(sI): "comment-alt", (is): sR,			(sD): "Send notification \"{0}\"",											(sP): [[(sN):"Message", (sT):sSTR]],												],
 		sendPushNotification	: [ (sN): "Send PUSH notification...",	(sA): true,	(sI): "comment-alt", (is): sR,			(sD): "Send PUSH notification \"{0}\"{1}",									(sP): [[(sN):"Message", (sT):sSTR],[(sN):"Store in Messages", (sT):sBOOLN, (sD):" and store in Messages", (sS):1]],	],
 		sendSMSNotification		: [ (sN): "Send SMS notification...",	(sA): true,	(sI): "comment-alt", (is): sR,			(sD): "Send SMS notification \"{0}\" to {1}{2}",							(sP): [[(sN):"Message", (sT):sSTR],[(sN):"Phone number", (sT):"phone",w:"HE requires +countrycode in phone number."],[(sN):"Store in Messages", (sT):sBOOLN, (sD):" and store in Messages", (sS):1]],	],
-		log						: [ (sN): "Log to console...",			(sA): true,	(sI): "bug",				(sD): "Log {0} \"{1}\"{2}",												(sP): [[(sN):"Log type", (sT):sENUM, (sO):[sINFO,sTRC,sDBG,sWARN,sERR]],[(sN):"Message", (sT):sSTR],[(sN):"Store in Messages", (sT):sBOOLN, (sD):" and store in Messages", (sS):1]],	],
-		httpRequest				: [ (sN): "Make a web request",			(sA): true,	(sI): "anchor", (is): sR,		(sD): "Make a {1} request to {0}",					(sP): [[(sN):"URL", (sT):"uri"],[(sN):"Method", (sT):sENUM, (sO):["GET","POST","PUT","DELETE","HEAD"]],[(sN):"Request body type", (sT):sENUM, (sO):["JSON","FORM","CUSTOM"]],[(sN):"Send variables", (sT):"variables", (sD):"data {v}"],[(sN):"Request body", (sT):sSTR, (sD):"data {v}"],[(sN):"Request content type", (sT):sENUM, (sO):["text/plain","text/html",sAPPJSON,"application/x-www-form-urlencoded","application/xml"]],[(sN):"Authorization header", (sT):sSTR, (sD):sBVB]],	],
+		log						: [ (sN): "Log to console...",			(sA): true,	(sI): "bug",				(sD): "Log {0} \"{1}\"{2}",													(sP): [[(sN):"Log type", (sT):sENUM, (sO):[sINFO,sTRC,sDBG,sWARN,sERR]],[(sN):"Message", (sT):sSTR],[(sN):"Store in Messages", (sT):sBOOLN, (sD):" and store in Messages", (sS):1]],	],
+		httpRequest				: [ (sN): "Make a web request",			(sA): true,	(sI): "anchor", (is): sR,		(sD): "Make a {1} request to {0}",										(sP): [[(sN):"URL", (sT):"uri"],[(sN):"Method", (sT):sENUM, (sO):["GET","POST","PUT","DELETE","HEAD"]],[(sN):"Request body type", (sT):sENUM, (sO):["JSON","FORM","CUSTOM"]],[(sN):"Send variables", (sT):"variables", (sD):"data {v}"],[(sN):"Request body", (sT):sSTR, (sD):"data {v}"],[(sN):"Request content type", (sT):sENUM, (sO):["text/plain","text/html",sAPPJSON,"application/x-www-form-urlencoded","application/xml"]],[(sN):"Authorization header", (sT):sSTR, (sD):sBVB]],	],
 		setVariable				: [ (sN): "Set variable...",			(sA): true,	(sI): "superscript", (is):sR,	(sD): "Set variable {0} = {1}",											(sP): [[(sN):"Variable", (sT):sVARIABLE],[(sN):"Value", (sT):sDYN]],	],
 		setState				: [ (sN): "Set piston state...",		(sA): true,	(sI): "align-left", (is):sL,	(sD): "Set piston state to \"{0}\"",										(sP): [[(sN):"State", (sT):sSTR]],	],
 		setTileColor			: [ (sN): "Set piston tile colors...",	(sA): true,	(sI): "info-square", (is):sL,	(sD): "Set piston tile #{0} colors to {1} over {2}{3}",					(sP): [[(sN):"Tile Index", (sT):sENUM,(sO):tileIndexes],[(sN):"Text Color", (sT):sCOLOR],[(sN):"Background Color", (sT):sCOLOR],[(sN):"Flash mode", (sT):sBOOLN,(sD):" (flashing)"]],	],
@@ -5777,6 +5777,8 @@ private Map<String,Map> virtualDevices(){
 // HE specific events
 		rule:			[ (sN): 'Rule',				(sT): sENUM,	(sO): getRuleOptions(),		(sM): true ],
 		cloudBackup:	[ (sN): 'Cloud Backup',		(sT): sSTR,		(sM): true],
+		manualReboot:	[ (sN): 'Manual Reboot',	(sT): sSTR,		(sM): true],
+		update:			[ (sN): 'Software Update',	(sT): sSTR,		(sM): true],
 		lowMemory:		[ (sN): 'Low Memory',		(sT): sSTR,		(sM): true],
 		systemStart:	[ (sN): 'System Start',		(sT): sSTR,		(sM): true],
 		severeLoad:		[ (sN): 'Severe Load',		(sT): sSTR,		(sM): true],
