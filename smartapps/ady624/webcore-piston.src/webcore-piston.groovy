@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update April 3, 2024 for Hubitat
+ * Last update April 12, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -8086,12 +8086,16 @@ private static void updateCache(Map r9,Map value,Long t){
 }
 
 @CompileStatic
-private static Map valueCacheChanged(Map r9,Map comparisonValue){
+private Map valueCacheChanged(Map r9,Map comparisonValue){
+	Boolean lg=isDbg(r9)
 	String n=sMs(comparisonValue,sI)
 	def oV=mMs(r9,sCACHE)[n]
 	Map newValue=mMv(comparisonValue)
 	Map oldValue= oV instanceof Map ? oV:null
-	return (oldValue!=null && (sMt(oldValue)!=sMt(newValue) || "${oldValue[sV]}"!="${newValue[sV]}")) ? [(sI):n,(sV):oldValue] :null
+	Map res= (oldValue!=null && (sMt(oldValue)!=sMt(newValue) || "${oldValue[sV]}"!="${newValue[sV]}")) ? [(sI):n,(sV):oldValue] :null
+	if(lg)
+		debug "Previous value ${res!=null ? "changed from ${oldValue[sV]} (${sMt(oldValue)}) to ${newValue[sV]} (${sMt(newValue)})}" : "was not found, or did not change (${oldValue} -> ${newValue})" }",r9
+	return res
 }
 
 @CompileStatic
@@ -8292,29 +8296,29 @@ private static Boolean comp_event_occurs		(Map r9,Map lv,Map rv=null,Map rv2=nul
 private Boolean comp_executes			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is(r9,lv,rv,rv2,tv,tv2)}
 private Boolean comp_arrives			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return (String)r9[sEVENT][sNM]=='email' && match(r9[sEVENT]?.jsonData?.from ?: sBLK,strEvalExpr(r9,mMv(rv))) && match(r9[sEVENT]?.jsonData?.message ?: sBLK,strEvalExpr(r9,mMv(rv2)))}
 private static Boolean comp_happens_daily_at		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ bIs(r9,sWUP) }
-private static Boolean comp_changes		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && matchDeviceInteraction(lv,r9)}
-private static Boolean comp_changes_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && comp_receives(r9,lv,rv,rv2,tv,tv2)}
-private static Boolean comp_changes_away_from		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && "${oMvv(oldValue)}"=="${oMvv(rv)}" && matchDeviceInteraction(lv,r9)}
-private static Boolean comp_drops				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && dcast(r9,oMvv(oldValue))>dcast(r9,oMvv(lv))}
-private static Boolean comp_does_not_drop		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_drops(r9,lv,rv,rv2,tv,tv2)}
-private static Boolean comp_drops_below		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>=v1 && dcast(r9,oMvv(lv))<v1}
-private static Boolean comp_drops_to_or_below	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>v1 && dcast(r9,oMvv(lv))<=v1}
-private static Boolean comp_rises				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && dcast(r9,oMvv(oldValue))<dcast(r9,oMvv(lv))}
-private static Boolean comp_does_not_rise		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_rises(r9,lv,rv,rv2,tv,tv2)}
-private static Boolean comp_rises_above		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<=v1 && dcast(r9,oMvv(lv))>v1}
-private static Boolean comp_rises_to_or_above	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<v1 && dcast(r9,oMvv(lv))>=v1}
-private static Boolean comp_remains_below		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<v1 && dcast(r9,oMvv(lv))<v1}
-private static Boolean comp_remains_below_or_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<=v1 && dcast(r9,oMvv(lv))<=v1}
-private static Boolean comp_remains_above		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>v1 && dcast(r9,oMvv(lv))>v1}
-private static Boolean comp_remains_above_or_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>=v1 && dcast(r9,oMvv(lv))>=v1}
-private static Boolean comp_enters_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return (ov<v1 || ov>v2) && v>=v1 && v<=v2}
-private static Boolean comp_exits_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return ov>=v1 && ov<=v2 && (v<v1 || v>v2)}
-private static Boolean comp_remains_inside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return ov>=v1 && ov<=v2 && v>=v1 && v<=v2}
-private static Boolean comp_remains_outside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return (ov<v1 || ov>v2) && (v<v1 || v>v2)}
-private static Boolean comp_becomes_even		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2!=iZ && icast(r9,oMvv(lv))%i2==iZ}
-private static Boolean comp_becomes_odd		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2==iZ && icast(r9,oMvv(lv))%i2!=iZ}
-private static Boolean comp_remains_even		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2==iZ && icast(r9,oMvv(lv))%i2==iZ}
-private static Boolean comp_remains_odd		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2!=iZ && icast(r9,oMvv(lv))%i2!=iZ}
+private Boolean comp_changes		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && matchDeviceInteraction(lv,r9)}
+private Boolean comp_changes_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && comp_receives(r9,lv,rv,rv2,tv,tv2)}
+private Boolean comp_changes_away_from		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && "${oMvv(oldValue)}"=="${oMvv(rv)}" && matchDeviceInteraction(lv,r9)}
+private Boolean comp_drops				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && dcast(r9,oMvv(oldValue))>dcast(r9,oMvv(lv))}
+private Boolean comp_does_not_drop		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_drops(r9,lv,rv,rv2,tv,tv2)}
+private Boolean comp_drops_below		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>=v1 && dcast(r9,oMvv(lv))<v1}
+private Boolean comp_drops_to_or_below	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>v1 && dcast(r9,oMvv(lv))<=v1}
+private Boolean comp_rises				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && dcast(r9,oMvv(oldValue))<dcast(r9,oMvv(lv))}
+private Boolean comp_does_not_rise		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_rises(r9,lv,rv,rv2,tv,tv2)}
+private Boolean comp_rises_above		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<=v1 && dcast(r9,oMvv(lv))>v1}
+private Boolean comp_rises_to_or_above	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<v1 && dcast(r9,oMvv(lv))>=v1}
+private Boolean comp_remains_below		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<v1 && dcast(r9,oMvv(lv))<v1}
+private Boolean comp_remains_below_or_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<=v1 && dcast(r9,oMvv(lv))<=v1}
+private Boolean comp_remains_above		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>v1 && dcast(r9,oMvv(lv))>v1}
+private Boolean comp_remains_above_or_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>=v1 && dcast(r9,oMvv(lv))>=v1}
+private Boolean comp_enters_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return (ov<v1 || ov>v2) && v>=v1 && v<=v2}
+private Boolean comp_exits_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return ov>=v1 && ov<=v2 && (v<v1 || v>v2)}
+private Boolean comp_remains_inside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return ov>=v1 && ov<=v2 && v>=v1 && v<=v2}
+private Boolean comp_remains_outside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return (ov<v1 || ov>v2) && (v<v1 || v>v2)}
+private Boolean comp_becomes_even		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2!=iZ && icast(r9,oMvv(lv))%i2==iZ}
+private Boolean comp_becomes_odd		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2==iZ && icast(r9,oMvv(lv))%i2!=iZ}
+private Boolean comp_remains_even		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2==iZ && icast(r9,oMvv(lv))%i2==iZ}
+private Boolean comp_remains_odd		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2!=iZ && icast(r9,oMvv(lv))%i2!=iZ}
 
 private Boolean comp_changes_to_any_of			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && comp_is_any_of(r9,lv,rv,rv2,tv,tv2) && matchDeviceInteraction(lv,r9)}
 private Boolean comp_changes_away_from_any_of		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && comp_is_any_of(r9,oldValue,rv,rv2) && matchDeviceInteraction(lv,r9)}
