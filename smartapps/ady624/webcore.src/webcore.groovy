@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update April 3, 2024 for Hubitat
+ * Last update May 30, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -3937,6 +3937,7 @@ private Map renderRes(Map result){
 private Map wrender(Map options=[:]){
 	//debug "wrender: options:: ${options} "
 	//debug "request: ${request} "
+	/*
 	Map h=(Map)request?.headers
 	if(h && sMs(h,sAE)?.contains(sGZIP)){
 //		debug "will accept gzip"
@@ -3952,7 +3953,8 @@ private Map wrender(Map options=[:]){
 			}catch(ignored){}
 		}
 	}
-	render(options)
+	 */
+	render(options + [gzipContent: true])
 }
 
 static String string2gzip(String s){

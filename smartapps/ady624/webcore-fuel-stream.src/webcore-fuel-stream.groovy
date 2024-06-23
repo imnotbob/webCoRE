@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update January 2, 2024 for Hubitat
+ *  Last update May 30, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -14572,6 +14572,7 @@ private Map queueSemaphore(Map event){
 private Map wrender(Map options=[:]){
 	//debug "wrender: options:: ${options} "
 	//debug "request: ${request} "
+	/*
 	Map h=(Map)request?.headers
 	if(h && sMs(h,sAE)?.contains(sGZIP)){
 //		debug "will accept gzip"
@@ -14587,7 +14588,8 @@ private Map wrender(Map options=[:]){
 			}catch(ignored){}
 		}
 	}
-	render(options)
+	 */
+	render(options + [gzipContent: true])
 }
 
 static String string2gzip(String s){
