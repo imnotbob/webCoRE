@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - April 3, 2024'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - May 30, 2024'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
