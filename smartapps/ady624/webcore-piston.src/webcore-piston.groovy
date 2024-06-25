@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update May 30, 2024 for Hubitat
+ * Last update June 24, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -7835,7 +7835,7 @@ private Boolean evaluateComparison(Map r9,String comparison,Map lo,Map ro=null,M
 	//if multiple left values go through each
 	Map tvalue=to && to[sOPERAND] && to[sVALUES] ? mMs(to,sVALUES)+[(sF): mMs(to,sOPERAND)[sF]]:null
 	Map tvalue2=to2 && to2[sOPERAND] && to2[sVALUES]? mMs(to2,sVALUES):null
-	Boolean fa=bIs(options,sFRCALL)
+	Boolean fa=bIs(options,sFRCALL) // force all to be evaluated
 	for(Map<String,Map> value in liMs(lo,sVALUES)){
 		res=false
 		//x=eXclude- if a trigger comparison or a momentary device/attribute is looked for,
@@ -8334,7 +8334,7 @@ private Boolean comp_changes_away_from_any_of		(Map r9,Map lv,Map rv=null,Map rv
 
 private Boolean comp_stays				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is(r9,lv,rv,rv2,tv,tv2)}
 //private Boolean comp_stays_unchanged			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return true }
-private static Boolean comp_stays_unchanged			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_changes(r9,lv,rv,rv2,tv,tv2)}
+private Boolean comp_stays_unchanged			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_changes(r9,lv,rv,rv2,tv,tv2)}
 private Boolean comp_stays_not				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_not(r9,lv,rv,rv2,tv,tv2)}
 private Boolean comp_stays_equal_to			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_equal_to(r9,lv,rv,rv2,tv,tv2)}
 private Boolean comp_stays_different_than		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_different_than(r9,lv,rv,rv2,tv,tv2)}
