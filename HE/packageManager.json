@@ -1,13 +1,13 @@
 {
   "packageName": "webCoRE",
   "author": "imnot_bob",
-  "version": "1.0.95",
+  "version": "1.0.96",
   "minimumHEVersion": "2.3.2",
   "licenseFile": "https://raw.githubusercontent.com/imnotbob/webCoRE/hubitat-patches/LICENSE",
-  "releaseNotes": "SHOULD REBOOT HUB, wait few mins, then update webCoRE.  HPM has had problems hanging on new HE firmware releases...may need to update files manually\n\n1.0.95 - fix for not found method\n1.0.94 - update for cloud gzip responses, updates to json logging, IDE improvement for timers, optimizations \n1.0.93 - another time handling fix, and optimization, bug fixes\n1.0.92 - update time handling for compler issue\n1.0.91 - update time handling with sunrise/sunset\n1.0.90 - update IDE operations during edit with variables\n1.0.89 - Fix for hsmAlert events, cleanup azimuth and altitude sun calculations\n1.0.88 - Fix for graph current value, fix for graph setting for http vs https, new location events lowMemory and cloudBackup, fixed marking of global variables in use, added altitude and azimuth to weather data, UI modules updates\n1.0.87 - DST updates, graph tile fixes\n1.0.86 - fix roundtominutes\n1.0.85 - update sunrise, sunset\n1.0.84 - update switch statement subscription display\n1.0.83 - add asin, sin, cos function, update to allow piston setting custom timezone for sunrise/sunset",
+  "releaseNotes": "SHOULD REBOOT HUB, wait few mins, then update webCoRE.  HPM has had problems hanging on new HE firmware releases...may need to update files manually\n\n1.0.96 - update timer event handling\n1.0.95 - fix for not found method\n1.0.94 - update for cloud gzip responses, updates to json logging, IDE improvement for timers, optimizations \n1.0.93 - another time handling fix, and optimization, bug fixes\n1.0.92 - update time handling for compler issue\n1.0.91 - update time handling with sunrise/sunset\n1.0.90 - update IDE operations during edit with variables\n1.0.89 - Fix for hsmAlert events, cleanup azimuth and altitude sun calculations\n1.0.88 - Fix for graph current value, fix for graph setting for http vs https, new location events lowMemory and cloudBackup, fixed marking of global variables in use, added altitude and azimuth to weather data, UI modules updates\n1.0.87 - DST updates, graph tile fixes\n1.0.86 - fix roundtominutes\n1.0.85 - update sunrise, sunset\n1.0.84 - update switch statement subscription display\n1.0.83 - add asin, sin, cos function, update to allow piston setting custom timezone for sunrise/sunset",
   "documentationLink": "https://wiki.webcore.co",
   "communityLink": "https://community.hubitat.com/t/webcore-for-hubitat-updates/11967",
-  "dateReleased": "2024-06-24",
+  "dateReleased": "2024-09-25",
   "apps": [
     {
       "id": "cb649f7b-d33d-42b8-82c3-79d1d2101fea",

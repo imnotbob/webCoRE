@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update June 24, 2024 for Hubitat
+ * Last update September 25, 2024 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -2740,11 +2740,11 @@ void execute(Map data,String src){
 void resumeHandler(){ commonHandle(sPSTNRSM) }
 
 @Field static final String sTIMHNDR='timeHandler'
-/** called as runInMillis */
+/** called as runInMillis; it really is not an event */
 void timeHandler(event){ timeHelper(event,false) }
 
 void timeHelper(event,Boolean recovery){
-	Long t=lMt(event)
+	Long t= lMt(event)
 	handleEvents([(sDATE):new Date(t),(sDEV):gtLocation(),(sNM):sTIME,(sVAL):t,(sSCH):event,(sRECOVERY):recovery],!recovery)
 }
 
@@ -2761,7 +2761,10 @@ void executeHandler(event){
 		String d=(String)d1
 		if(stJson(d))data= (LinkedHashMap)new JsonSlurper().parseText(d)
 	}
-	handleEvents([(sDATE):event.date,(sDEV):gtLocation(),(sNM):'execute',(sVAL):event[sVAL],(sJSOND):(data ?: event[sJSOND])])
+	if(event[sVAL]==sRECOVERY)
+		handleEvents([(sDATE):event.date,(sDEV):gtLocation(),(sNM):sTIME,(sVAL):event[sVAL],(sSCH):[t:wnow()],(sRECOVERY):true],false)
+	else
+		handleEvents([(sDATE):event.date,(sDEV):gtLocation(),(sNM):'execute',(sVAL):event[sVAL],(sJSOND):(data ?: event[sJSOND])])
 }
 
 @Field static final String sEXS='Execution stage started'
@@ -2930,7 +2933,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		Map msg2; msg2=null
 		Boolean syncTime
 		firstTime=true
-		if(!(evntName in ListTIMEASYNC)){
+		if( (evntName==sTIME && bIs(event,sRECOVERY)) || !(evntName in ListTIMEASYNC)){
 			if(lg>i1){
 				msg2=timer sEXC,r9,iN1
 				trace sEXS,r9,i1
@@ -2939,6 +2942,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			if(lg>i1)trace msg2,r9
 			firstTime=false
 		}
+
 		if(evntName==sTIME && !bIs(event,sRECOVERY))
 			chgNextSch(r9,lZ)
 
@@ -2968,13 +2972,15 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			}
 
 			schedules=sgetSchedules(sHNDLEVT,myPep)
-			if(schedules==null || schedules==(List<Map>)[] || schedules.size()==iZ)break
+			if(schedules==null || schedules==(List<Map>)[] || schedules.size()==iZ)
+				break
 			Long t=wnow()
 
 			if(evntName==sASYNCREP){
 				String r=sR
 				event[sSCH]=schedules.sort{ Map it -> lMt(it) }.find{ Map it -> sMs(it,r)==evntVal }
 			}else{
+				// find the next timer to be run
 				//anything less than scheduleVariance (63ms) in the future is considered due; will do some pause to sync with it
 				Long tv=t+sVariance
 				sch=schedules.sort{ Map it -> lMt(it) }.find{ Map it -> lMt(it)<tv }
@@ -2983,14 +2989,15 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 				evntVal=t.toString()
 				event=[(sT):lMt(event),(sDEV):cvtLoc(),(sNM):evntName,(sVAL):t,(sSCH):sch]
 			}
+
+			if(event[sSCH]==null){ // if no timer found, exit
+				if(firstTime && eric())
+					warn "time event without schedule "+evntVal,r9
+				break
+			}
 			if(lMs(r9,sNSCH)!=lZ){
 				chgNextSch(r9,lZ)
 				wunschedule(sTIMHNDR)
-			}
-			if(event[sSCH]==null){
-				if(firstTime)
-					warn "time event without schedule "+evntVal,r9
-				break
 			}
 
 			sch=mMs(event,sSCH)
