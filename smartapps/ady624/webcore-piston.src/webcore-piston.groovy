@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update September 25, 2024 for Hubitat
+ * Last update February 26, 2025 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -2172,7 +2172,7 @@ private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queu
 					evtQ=theQueuesVFLD[mSmaNm]
 					evtQ=evtQ!=null ? evtQ:(List<Map>)[]
 					qsize=evtQ.size()
-					if(qsize>i12) clrC=true
+					if(qsize>i20) clrC=true
 					else{
 						evtQ.push(mEvt)
 						theQueuesVFLD[mSmaNm]=evtQ
@@ -6470,6 +6470,28 @@ private Long vcmd_httpRequest(Map r9,device,List prms){
 		userPart=uriSubParts[iZ]+sAT
 		uri=uriSubParts[i1]
 	}
+
+	Boolean internal; internal= uri.startsWith('10.') || uri.startsWith('192.168.')
+	if(!internal && uri.startsWith('172.')){ //check for the 172.16.x.x/12 class
+		String b; b=uri.tokenize(sDOT)[i1] //substring(4,6)
+		if(b.isInteger()){
+			Integer bi=b.toInteger()
+			internal=(bi>=i16 && bi<=31)
+		}
+	}
+/*
+	String[] split_path
+	split_path = uri.split('/')
+	uri = protocol+mat+userPart+split_path[iZ]
+	String path; path = '/'
+	Integer i
+	for(i=i1; i<split_path.size(); i++){
+		if(i>i1) path += '/'
+		path += split_path[i]
+	}
+	if(isEric(r9))debug "http uri: $uri",r9
+	if(isEric(r9))debug "http path: $path",r9
+*/
 	def data; data=null
 	if(reqBodyT=='CUSTOM' && !useQryS){
 		data=requestBody
@@ -6485,14 +6507,6 @@ private Long vcmd_httpRequest(Map r9,device,List prms){
 		data=sdata
 	}
 
-	Boolean internal; internal= uri.startsWith('10.') || uri.startsWith('192.168.')
-	if(!internal && uri.startsWith('172.')){ //check for the 172.16.x.x/12 class
-		String b; b=uri.tokenize(sDOT)[i1] //substring(4,6)
-		if(b.isInteger()){
-			Integer bi=b.toInteger()
-			internal=(bi>=i16 && bi<=31)
-		}
-	}
 	Map headers; headers=[:]
 	headers += auth ? (Map)(stJson(auth)? (new JsonSlurper().parseText(auth)):[Authorization: auth]):[:]
 	headers += ['Accept-Encoding': 'gzip,deflate']
@@ -6500,6 +6514,8 @@ private Long vcmd_httpRequest(Map r9,device,List prms){
 	try{
 		Map requestParams=[
 			uri: protocol+mat+userPart+uri,
+			//uri: uri,
+			//path: path,
 			query: useQryS ? data:null,
 			headers: headers,
 			(sCONTENTT): '*/*',
@@ -6574,7 +6590,8 @@ void ahttpRequestHandler(resp,Map callbackData){
 				mediaType=sBLK
 			}else{
 				try{
-					if((respOk || respRedir || rCode==i401) && resp.data){
+					//if((respOk || respRedir || rCode==i401) && resp.data) {
+					if(respOk || respRedir || rCode==i401) {
 						if(!binary){
 							data=resp.data
 							if(eric() && ((String)gtSetting(sLOGNG))?.toInteger()>i2) debug "http response $mediaType $rCode ${data} $t0",null
@@ -6589,7 +6606,10 @@ void ahttpRequestHandler(resp,Map callbackData){
 								setRtData[sMEDIADATA]=((String)resp.data).decodeBase64() // HE binary data is b64encoded resp.data.getBytes()
 							}
 						}
-					}else erMsg= 'http error'+erMsg
+					}else {
+						if(!rCode) rCode=i500
+						erMsg = 'http error rCode $rCode ' + erMsg
+					}
 				}catch(all){
 					erMsg= erMsg ?: " Response Status: ${resp.status} exception Message: ${all}".toString()
 					erMsg= 'http error'+erMsg
@@ -13760,11 +13780,9 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 
 @CompileStatic
 private static String rtnStr(v,Boolean frcStr=false){
-	if(v!=null && v!=[:] && v!=[] && v!=sBLK){
-		if(!frcStr && (v instanceof Map || v instanceof List)) return JsonOutput.toJson(v)
-		else return "${v}".toString()
-	}
-	return null
+	if(v==null || v==sBLK || v==sNL || v==[:] || v==[]) return sNL
+	if(!frcStr && (v instanceof Map || v instanceof List)) return JsonOutput.toJson(v)
+	return "${v}".toString()
 }
 
 @CompileStatic

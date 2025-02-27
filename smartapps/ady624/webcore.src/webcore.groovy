@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update September 25, 2024 for Hubitat
+ * Last update February 26, 2025 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - September 25, 2024'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - February 26, 2025'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -2899,6 +2899,7 @@ def api_email(){
 
 //path("/gforward/:pistonIdOrName"){action: [GET: "api_forward", POST: "api_forward"]}
 //return "${t0.cp}/gforward?access_token=${t0.at}&id=${sAppId()}&path=${path}".toString()
+// forward to a fuelstream child app
 private api_forward(){
 	Map data,result
 	result=[:]
@@ -2908,7 +2909,6 @@ private api_forward(){
 	remoteAddr=request.headers.'X-forwarded-for' ?: request.headers.Host
 	if(remoteAddr==null)remoteAddr=request.'X-forwarded-for' ?: request.Host
 	if(remoteAddr==null)remoteAddr='just'
-	debug "Dashboard or web request received to forward to graph from IP $remoteAddr Referer: ${request.headers.Referer}"
 //log.debug "params ${params} request: ${request}"
 	Map p=(Map)params
 	if(p){
@@ -2922,15 +2922,18 @@ private api_forward(){
 	data.remoteAddr=remoteAddr
 	data.referer=request.headers.Referer
 	String pistonIdOrName= sMs(p,'pistonIdOrName')
+	String msg
 	def piston= findPiston(pistonIdOrName,pistonIdOrName,handleFuelS())
 	//private findPiston(String id, String nm=sNL, String n=handlePistn()){
 	//private static String handleFuelS(){ return sWC+sFUELS }
 	if(piston!=null){
-		//"External forward for graph ${(String)piston.label} request from IP $remoteAddr".toString(),
+		msg = "External forward for graph ${(String)piston.label} request from IP $remoteAddr".toString()
+		debug "Dashboard or web request received to forward to graph from IP $remoteAddr Referer: ${request.headers.Referer} " + msg
 		return piston.gforward(data.path)
 	}else{
 		result.result='ERROR'
-		error "Piston not found for dashboard or web Request to forward to a graph $data from IP $remoteAddr $pistonIdOrName"
+		msg = "Fuel stream child not found for dashboard or web Request to forward to a graph $data from IP $remoteAddr $pistonIdOrName"
+		error msg
 	}
 	result[sTMSTMP]=wnow()
 	wrender( [ (sCONTENTT): sAPPJAVA, (sDATA): JsonOutput.toJson(result) ] )
@@ -2945,7 +2948,6 @@ private api_execute(){
 	remoteAddr=request.headers.'X-forwarded-for' ?: request.headers.Host
 	if(remoteAddr==null)remoteAddr=request.'X-forwarded-for' ?: request.Host
 	if(remoteAddr==null)remoteAddr='just'
-	debug "Dashboard or web request received to execute a piston from IP $remoteAddr Referer: ${request.headers.Referer}"
 //log.debug "params ${params} request: ${request}"
 	Map p=(Map)params
 	if(p){
@@ -2959,18 +2961,22 @@ private api_execute(){
 	data.remoteAddr=remoteAddr
 	data.referer=request.headers.Referer
 	String pistonIdOrName=sMs(p,'pistonIdOrName')
+	String msg
 	def piston= findPiston(pistonIdOrName,pistonIdOrName)
 	if(piston!=null){
+		msg = "External piston execute ${(String)piston.label} request from IP $remoteAddr".toString()
 		sendExecuteEvt(hashPID(piston.id),
 				remoteAddr,
 				"Execute event",
-				"External piston execute ${(String)piston.label} request from IP $remoteAddr".toString(),
+				msg,
 				data)
 		result.result='OK'
 	}else{
 		result.result='ERROR'
-		error "Piston not found for dashboard or web Request to execute a piston from IP $remoteAddr $pistonIdOrName"
+		msg = "Piston not found for dashboard or web Request to execute a piston from IP $remoteAddr $pistonIdOrName"
+		error msg
 	}
+	debug "Dashboard or web request received to execute a piston from IP $remoteAddr Referer: ${request.headers.Referer} " + msg
 	result[sTMSTMP]=wnow()
 	wrender( [ (sCONTENTT): sAPPJAVA, (sDATA): JsonOutput.toJson(result) ] )
 }
@@ -3380,6 +3386,7 @@ Map getDevDetails(dev, Boolean addtransform=false){
 	String dnm=dev.getDisplayName()
 	List<Map> newCL; newCL=[]
 	List cmdL; cmdL=dev.getSupportedCommands()
+	// List dev.getCapabilities()
 	//if(eric()) error("DEVICE $dnm")
 	//if(eric()) warn("COMMANDS $cmdL")
 	cmdL=cmdL.unique{ (String)it.getName() }
@@ -3431,7 +3438,7 @@ Map getDevDetails(dev, Boolean addtransform=false){
 
 	newCL= newCL.unique{ (String)it[sN] }
 
-	Map allCmds= gtAllCommands()
+	Map allCmds= gtAllCommands() // built in commands
 
 	for (Map cmd in newCL){
 		String cmdName=cmd[sN]
@@ -6301,7 +6308,8 @@ def pageDumpExecution(){
 	}
 	LinkedHashMap<String,Map> a; a=[:]
 	b.sort{ Map bb -> (bb[c]!= null ? -(Long)bb[c] : bb[c]) }.each { Map it ->
-		if((Long)it[c]) a= a+ [ (sMs(it,sID)): [(sNM):it[sNM], (c): it[c], (t): it[t]] ] as LinkedHashMap<String, Map>
+		if((Long)it[c]) //noinspection GrReassignedInClosureLocalVar
+			a= a+ [ (sMs(it,sID)): [(sNM):it[sNM], (c): it[c], (t): it[t]] ] as LinkedHashMap<String, Map>
 	}
 	String message=getMapDescStr(a)
 	return dynamicPage((sNM):sPDPEXC,(sTIT):sBLK,uninstall:false){
