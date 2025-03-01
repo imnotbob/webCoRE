@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update February 26, 2025 for Hubitat
+ * Last update March 1, 2025 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -266,6 +266,10 @@ static Boolean eric1(){ return false }
 @Field static final String sSTCLR='setColor'
 @Field static final String sCLRTEMP='colorTemperature'
 @Field static final String sSTCLRTEMP='setColorTemperature'
+@Field static final String sPUSH='push'
+@Field static final String sRELEASE='release'
+@Field static final String sHOLD='hold'
+@Field static final String sDOUBLETAP='doubleTap'
 @Field static final String sUTF8='UTF-8'
 
 @Field static final String sPEP='pep'
@@ -1516,7 +1520,7 @@ private static void fill_ListAL(){
 		ListLSTSTSTHREAX=[sLSTACTIVITY,sSTS,sTHREAX,sROOMID,sROOMNM]
 		ListIN35=[iN3,iN5]
 		ListIZIN9=[iZ,iN9]
-		ListDCO=[sSTCLRTEMP,sSTCLR,sSTHUE,sSTSATUR]
+		ListDCO=[sSTCLRTEMP,sSTCLR,sSTHUE,sSTSATUR,sPUSH,sRELEASE,sHOLD,sDOUBLETAP] // commands that do not allow command optimization
 		ListNOOPT=[sVARIABLE,sFUNC,sDEV,sOPERAND,sDURATION]
 		ListDATEDTIME=[sDATE,sDTIME]
 		ListSTRDYN=[sSTR,sDYN]
@@ -4619,15 +4623,21 @@ private void executePhysicalCommand(Map r9,device,String command,prms=[],Long id
 
 			Boolean skip; skip=false
 			// disableCommandOptimization
-			if(!gtPOpt(r9,sDCO) && !dco && !(command in ListDCO)){ //[sSTCLRTEMP,sSTCLR,sSTHUE,sSTSATUR]
+			// [sSTCLRTEMP,sSTCLR,sSTHUE,sSTSATUR,sPUSH,sRELEASE,sHOLD,sDOUBLETAP] // commands that do not allow command optimization
+			if(!gtPOpt(r9,sDCO) && !dco && !(command in ListDCO)){
 				Map cmd=PhysicalCommands()[command]
 				if(cmd!=null && sMa(cmd)!=sNL){
-					if(oMv(cmd)!=null && psz==iZ){
-						//commands with no parameter that set an attribute to a preset value
-						if((String)getDeviceAttributeValue(r9,device,sMa(cmd))==sMv(cmd))skip=true
-					}else if(psz==i1){
-						if(getDeviceAttributeValue(r9,device,sMa(cmd))==nprms[iZ])
-							skip=(command in ListSLVLSIFLVL ? gtSwitch(r9,device)==sON:true)
+					String attr= sMa(cmd)
+					Map attribute= Attributes()[attr]
+					if( attribute==null || attribute[sM]==null || !bIs(attribute,sM) ){ // not momentary attribute
+						if(oMv(cmd)!=null && psz==iZ) {
+							//commands with no parameter that set an attribute to a preset value
+							if ((String)getDeviceAttributeValue(r9,device,attr) == sMv(cmd))
+								skip= true
+						} else if(psz==i1) {
+							if(getDeviceAttributeValue(r9,device,attr) == nprms[iZ])
+								skip= (command in ListSLVLSIFLVL ? gtSwitch(r9,device)==sON : true)
+						}
 					}
 				}
 			}
@@ -6608,7 +6618,7 @@ void ahttpRequestHandler(resp,Map callbackData){
 						}
 					}else {
 						if(!rCode) rCode=i500
-						erMsg = 'http error rCode $rCode ' + erMsg
+						erMsg = "http error rCode $rCode " + erMsg
 					}
 				}catch(all){
 					erMsg= erMsg ?: " Response Status: ${resp.status} exception Message: ${all}".toString()
