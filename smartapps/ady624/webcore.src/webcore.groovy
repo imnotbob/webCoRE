@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update March 1, 2025 for Hubitat
+ * Last update June 22, 2025 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - March 1, 2025'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - June 22, 2025'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -3800,13 +3800,17 @@ private void registerInstance(Boolean force=true){
 				pd: pd,
 				lpd: lpd.join(',')
 			],
+			gzipBody: true,
 			timeout:20
 		]
 		lpa=null
 		lpd=null
 		if(eric()) debug "registering instance: params: $params"
 		params << [contentType: sAPPJSON, requestContentType: sAPPJSON]
+		// requestContentType: gzip, Header Content-Encoding: gzip;   Accept-Encoding: 'gzip, deflate'
 		asynchttpPut('myDone', params, [bbb:0])
+		// https://community.hubitat.com/t/asynchttppost-support-content-encoding/108611/3
+		//if()
 	}
 }
 
@@ -3814,10 +3818,13 @@ void myDone(resp, data){
 	String endpoint=(String)state.endpointCloud
 	String region=endpoint.contains('graph-eu') ? 'eu' : 'us'
 	String instanceId=getInstanceSid()
-	if(eric())debug "register resp: ${resp?.status} using api-${region}-${instanceId[i32]}.webcore.co:9247"
+	String s = "register resp: ${resp?.status} using api-${region}-${instanceId[i32]}.webcore.co:9247"
+	if(eric())debug s
 	if(resp?.status==200){
 		String wName=sAppId()
 		lastRegFLD[wName]=wnow()
+	}else{
+		error s
 	}
 }
 
@@ -3938,7 +3945,7 @@ private Map renderRes(Map result){
 	wrender( [ (sCONTENTT): sAPPJAVA, (sDATA): (String)params.callback+'('+JsonOutput.toJson(result)+')' ] )
 }
 
-@Field static final String sAE='Accept-encoding'
+@Field static final String sAE='Accept-Encoding'
 @Field static final String sCE='Content-Encoding'
 @Field static final String sGZIP='gzip'
 private Map wrender(Map options=[:]){
@@ -3961,6 +3968,8 @@ private Map wrender(Map options=[:]){
 		}
 	}
 	 */
+	//if()
+	// https://community.hubitat.com/t/asynchttppost-support-content-encoding/108611/3
 	render(options + [gzipContent: true])
 }
 

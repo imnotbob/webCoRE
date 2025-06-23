@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update March 1, 2025 for Hubitat
+ * Last update June 22, 2025 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -4435,13 +4435,13 @@ private Boolean executeTask(Map r9,List devices,Map statement,Map task,Boolean a
 	def virtualDevice=devices.size()!=iZ ? null:gtLocation()
 	for(device in (virtualDevice!=null ? [virtualDevice]:devices)){
 		if(virtualDevice==null && wdeviceHascommand(device,command) && !voverride){
-			if(command in LWCMDS){
+			if(command in LWCMDS){ // device commands with added parameters by webCoRE (have cmd_ wrapper (11))
 				Boolean doL= isInf(r9) && !isTrc(r9)
 				Map msg; msg=null
 				if(doL) msg=timer "Executed [$device].${command}",r9
 				try{
-					delay= callCmdWrap(r9,device,prms,'cmd_'+command) //"cmd_${command}"(r9,device,prms) // some device commands have a wrapper method (11)
-					if(doL) msg[sM]=sMs(msg,sM)+" W"
+					delay= callCmdWrap(r9,device,prms,'cmd_'+command)
+					if(doL && delay!=lZ) msg[sM]=sMs(msg,sM)+" W"
 				}catch(e){
 					if(doL) msg[sM]=sMs(msg,sM)+" SKIP"
 					error "Error while executing command $device.$command($prms):",r9,iN2,e
@@ -6420,7 +6420,7 @@ private Long vcmd_lifxPulse(Map r9,device,List prms){
 @CompileStatic
 private Long vcmd_httpRequest(Map r9,device,List prms){
 	String uri
-	uri=(sLi(prms,iZ)).replace(sSPC,"%20")
+	uri=(sLi(prms,iZ))?.replace(sSPC,"%20") // may be null
 	if(!uri){
 		error "Error executing external web request:no URI",r9
 		return lZ
