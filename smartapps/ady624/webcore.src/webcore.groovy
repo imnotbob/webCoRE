@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update June 22, 2025 for Hubitat
+ * Last update September 19, 2025 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - June 22, 2025'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - September 19, 2025'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -4263,21 +4263,26 @@ void broadcastPistonList(Boolean frc=false){
 		if(lastbcast && (lnow - lastbcast < 20000L)) return // 20 sec in ms
 	}
 	lastBroadCastFLD[wName]=lnow
+	List t = gtCachedchildApps(wName).collect{ Map it ->
+		[ (sID): it.pid, (sN): it.nlabel, (sA): it.label ]
+	}
+	Map data = [
+			(sID): getInstanceSid(),
+			(sNM): appName(),
+			pistons: t
+	]
+
+	String ds = JsonOutput.toJson(data)
+
 	sendLocationEvent(
 		[
 			(sNM): handle(),
 			(sVAL): 'pistonList',
 			isStateChange: true,
 			displayed: false,
-			(sDATA): [
-				(sID): getInstanceSid(),
-				(sNM): appName(),
-				pistons: gtCachedchildApps(wName).collect{ Map it ->
-					[ (sID): it.pid, (sNM): it.nlabel, aname: it.label ]
-				}
-			]
+			(sDATA): ds
 		])
-	trace 'broadcastPistonList sent'
+	trace "broadcastPistonList sent (${t.size()})"
 }
 
 private void wrunInMillis(Long t,String m,Map d){ runInMillis(t,m,d) }
