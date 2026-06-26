@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update September 19, 2025 for Hubitat
+ * Last update June 25, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - September 19, 2025'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - June 25, 2026'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -1184,7 +1184,7 @@ private void initialize(){
 
 	Boolean sprp= gtSetB(pS)
 	if(prpSid==null || prpSid!=sprp){
-		Boolean t0=sprp!=null ?: true
+		Boolean t0=sprp!=null ? sprp : true
 		assignAS(pS,t0)
 		assignSt(pS,t0)
 		app.updateSetting(pS, [(sTYPE): sBOOL, (sVAL): t0])
@@ -1477,8 +1477,14 @@ Boolean getTheLock(String meth=sNL){
 		wpauseExecution(waitT)
 		wait=true
 		if((wnow()-t) > 30000L){
-			releaseTheLock('getLock')
+			// Drain any lingering permits so we start from a known locked state
+			// (permits=0), then break treating ourselves as the holder.
+			// releaseTheLock guards against over-release, so the original stuck
+			// holder releasing later won't corrupt the permit count.
+			sema.drainPermits()
+			lockTimeFLD=null
 			warn "overriding lock $meth"
+			break
 		}
 	}
 	lockTimeFLD=wnow()
@@ -1489,7 +1495,10 @@ Boolean getTheLock(String meth=sNL){
 static void releaseTheLock(String meth=sNL){
 	lockTimeFLD=null
 	Semaphore sema=theSerialLockFLD
-	sema.release()
+	// Guard against double-release: only release if currently locked (permits==0).
+	// This covers the case where a force-timeout override already drained permits
+	// and the stuck original holder later calls release.
+	if(sema.availablePermits()==0) sema.release()
 }
 
 @Field volatile static Map<String,List<Map>> childAppsFLD= [:]
@@ -2013,6 +2022,7 @@ private void checkResultSize(Map result, Boolean requireDb=false, String caller=
 		//debug "Check size found ${resl}KB response requireDb: (${requireDb}) caller: ${caller}"
 		if(resl > 95){ //these are loaded anyway right after loading the piston
 			warn "Trimming ${resl}KB response to smaller size (${requireDb}) caller: ${caller}"
+			result.trimmed=true
 
 			Map rd= (Map)result[sDATA]
 			if(rd){
@@ -2148,9 +2158,10 @@ private api_intf_dashboard_piston_set_start(){
 		String chunkstr="${p?.chunks}".toString()
 		Integer chunks=chunkstr.isInteger() ? chunkstr.toInteger() : iZ
 		String wName=sAppId()
+		String ckey=wName+sCLN+sMs(p,'token')
 		if((chunks > iZ) && (chunks < i100)){
 			clearHashMap(wName)
-			pPistonChunksFLD[wName]=[(sID): p?.id, count: chunks]
+			pPistonChunksFLD[ckey]=[(sID): p?.id, count: chunks]
 			pPistonChunksFLD=pPistonChunksFLD
 			mb()
 			result=[(sSTS): "ST_READY"]
@@ -2163,16 +2174,17 @@ private api_intf_dashboard_piston_set_chunk(){
 	Map result
 	String wName=sAppId()
 	Map p=(Map)params
+	String ckey=wName+sCLN+sMs(p,'token')
 	String mchunk="${p?.chunk}".toString()
 	Integer chunk=mchunk.isInteger() ? mchunk.toInteger() : -i1
-	debug "Dashboard: Request received to set a piston chunk (#${1 + chunk}/${pPistonChunksFLD[wName]?.count})"
+	debug "Dashboard: Request received to set a piston chunk (#${1 + chunk}/${pPistonChunksFLD[ckey]?.count})"
 	if(verifySecurityToken(p)){
 		String data=(String)p?.data
 		mb()
-		LinkedHashMap<String,Object>chunks=pPistonChunksFLD[wName]
+		LinkedHashMap<String,Object>chunks=pPistonChunksFLD[ckey]
 		if(chunks && (Integer)chunks.count && (chunk >= iZ) && (chunk < (Integer)chunks.count)){
 			chunks["chunk:$chunk".toString()]=data
-			pPistonChunksFLD[wName]=chunks
+			pPistonChunksFLD[ckey]=chunks
 			mb()
 			result=[(sSTS): "ST_READY"]
 		}else{ result=[(sSTS): sERROR, (sERR): sERRCHUNK] }
@@ -2183,10 +2195,12 @@ private api_intf_dashboard_piston_set_chunk(){
 private api_intf_dashboard_piston_set_end(){
 	Map result
 	String wName=sAppId()
+	Map ep=(Map)params
+	String ckey=wName+sCLN+sMs(ep,'token')
 	debug "Dashboard: Request received to set a piston (chunked end)"
-	if(verifySecurityToken((Map)params)){
+	if(verifySecurityToken(ep)){
 		mb()
-		LinkedHashMap<String,Object> chunks=pPistonChunksFLD[wName]
+		LinkedHashMap<String,Object> chunks=pPistonChunksFLD[ckey]
 		if(chunks && (Integer)chunks.count){
 			Boolean ok; ok=true
 			String data; data=sBLK
@@ -2204,7 +2218,7 @@ private api_intf_dashboard_piston_set_end(){
 				i++
 			}
 			state.remove("chunks")
-			pPistonChunksFLD[wName]=null
+			pPistonChunksFLD[ckey]=null
 			mb()
 			if(ok){
 				//save the piston
@@ -2531,7 +2545,7 @@ private api_intf_variable_set(){
 		}else{
 			def piston=findPiston(pid)
 			if(piston){
-				localVars=(Map)piston.setLocalVariable(name, value.v)
+				localVars=(Map)piston.setLocalVariable(name, value?.v)
 				//clearBaseResult('api_intf_variable_set')
 				result=[(sSTS): sSUCC] + [(sID): pid, localVars: localVars]
 			}else{ result=api_get_error_result(sERRID) }
@@ -2689,7 +2703,6 @@ private api_intf_fuelstreams_get(){
 		stream=wgetChildApps().find {
 			(String)it.name==n && ((String)it.label).contains('||') && ((String)it.label).startsWith("$id - ")
 		}
-		result=stream.listFuelStreamData(id)
 	}else{
 		stream = gtLTS()
 	}
@@ -3616,11 +3629,11 @@ private Boolean verifySecurityToken(Map params){
 		assignAS(sSECTOKENS,tokens)
 	}
 	Long token=tokens[tokenId]
-	Long lnow=wnow()
-	if(token && token < lnow){
-		if(tokens) error "Dashboard: Authentication failed due to an invalid token"
+	if(!token){
+		error "Dashboard: Authentication failed - token not found or expired for ${tokenId}"
+		return false
 	}
-	return token && token >= lnow
+	return token >= wnow()
 }
 
 private String createSecurityToken(){
@@ -3668,7 +3681,7 @@ private void stopDashboard(){
 
 private String accountSid(){
 	Boolean stprp= (Boolean)gtSt('properSID')
-	Boolean useNew=stprp!=null ?: true
+	Boolean useNew=stprp!=null ? stprp : true
 	String t='-A'
 	String accountStr
 	accountStr= gtHubUID() + (useNew ? t : sNL)
@@ -3700,7 +3713,7 @@ private String locationSid(){
 		if(acctANDloc()) t= gtSetStr('acctID') + gtSetStr('locID') + sML
 		else{
 			Boolean stprp= (Boolean)gtSt('properSID')
-			Boolean useNew=stprp!=null ?: true
+			Boolean useNew=stprp!=null ? stprp : true
 			t= (useNew ? gtHubUID()+gtLname() : ((Long)location.id).toString()) + sML
 		}
 		//if(eric()) debug "instance location: $t"
@@ -3712,7 +3725,7 @@ private String locationSid(){
 
 private String getInstanceSid(){
 	Boolean stprp= (Boolean)gtSt('properSID')
-	Boolean useNew=stprp!=null ?: true
+	Boolean useNew=stprp!=null ? stprp : true
 	String hsh=sAppId()
 	String t='-I'
 	String instStr=useNew ? gtHubUID()+hsh+t : hsh
@@ -6149,7 +6162,7 @@ private String hashId(id){
 	return result
 }
 
-@Field static Semaphore theMBLockFLD=new Semaphore(0)
+@Field static Semaphore theMBLockFLD=new Semaphore(1)
 
 // Memory Barrier
 static void mb(String meth=sNL){

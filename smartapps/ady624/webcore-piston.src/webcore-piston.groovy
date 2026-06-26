@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update June 22, 2025 for Hubitat
+ * Last update June 25, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -682,7 +682,7 @@ private static Integer gtPOpt(Map r9,String nm){
 }
 
 @CompileStatic
-private static Boolean logIs(Map r9,Integer i){ iMs(r9,sLOGNG)>i }
+private static Boolean logIs(Map r9,Integer i){ (iMs(r9,sLOGNG) ?: iZ)>i }
 @CompileStatic
 private static Boolean isDbg(Map r9){ logIs(r9,i2) }
 @CompileStatic
@@ -1114,7 +1114,7 @@ void uninstalled(){
 void initialize(){
 	svSunTFLD=[:]; mb()
 	String tt1=(String)gtSetting(sLOGNG)
-	Integer tt2=iMs(gtState(),sLOGNG)
+	Integer tt2=iMs(gtState(),sLOGNG) ?: iZ
 	String tt3=tt2.toString()
 	if(tt1==sNL) setLoggingLevel(tt2 ? tt3:s0,false)
 	else if(tt1!=tt3) setLoggingLevel(tt1,false)
@@ -1935,7 +1935,7 @@ static Map shortRtd(Map r9){
 
 Map setBin(String bin){
 	String typ='setBin'
-	if(!bin || !!sMs(gtState(),sBIN)){
+	if(!bin){
 		doLog(sERROR,typ+': bad bin')
 		return [:]
 	}
@@ -2007,7 +2007,7 @@ Boolean getTheLockW(String qname,String meth=sNL,Boolean longWait=false){
 }
 
 @CompileStatic
-static void releaseTheLock(String qname){
+void releaseTheLock(String qname){
 	Integer semaNum=semaNum(qname)
 	String semaSNum=semaNum.toString()
 	Semaphore sema=sema(semaNum)
@@ -2054,7 +2054,7 @@ static Integer semaNum(String name){
 }
 
 @CompileStatic
-static Semaphore sema(Integer snum){
+Semaphore sema(Integer snum){
 	switch(snum){
 		case iStripes: return theLock22FLD
 		case iZ: return theLock0FLD
@@ -2080,8 +2080,9 @@ static Semaphore sema(Integer snum){
 		case i20: return theLock20FLD
 		case 21: return theLock21FLD
 		case (iStripes+i1): return theLock23FLD
-		default: //doLog(sERROR,"bad hash result $snum")
-			return null
+		default:
+			doLog(sERROR,"bad hash result $snum")
+			return theLock0FLD
 	}
 }
 
@@ -2196,8 +2197,8 @@ private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queu
 		}
 		releaseTheLock(mSmaNm)
 		if(clrC){
-			error "large queue size ${qsize} clearing",r9
-			clear1(true,true,true,true) // resets semaphore
+			error "large queue size ${qsize}, dropping event",r9
+			didQ=true
 		}
 	}
 	return [
@@ -2625,7 +2626,8 @@ private void checkVersion(Map r9){
 		String tt1="parent app's version($t0)".toString()
 		String tt2=' is newer than the '
 		String msg
-		if(ver>t0)msg=tt0+tt2+tt1
+		Closure padVer={ String v -> v.replaceAll(/(\d+)/){ m -> m[0].padLeft(10,'0') } }
+		if(padVer(ver)>padVer(t0))msg=tt0+tt2+tt1
 		else msg=tt1+tt2+tt0
 		warn "WARNING: Results may be unreliable because the "+msg+". Please update both apps to the same version.",r9
 	}
@@ -3629,12 +3631,13 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 		Map cncls=mMs(r9,sCNCLATNS)
 		if(bIs(cncls,sALL)){
 			//cancel all statement and any other pending -3,-5 events (device schedules); does not cancel EVERY blocks -1 iN1 or $:0 condition requests
-			if(ts)
+			if(ts){
 				if(lg)whatCnclsA(r9)
 				for(Map sch in ts){
 					Integer i=iMs(sch,sI)
 					if(i>iZ || i in ListIN35) schedules.remove(sch)
 				}
+			}
 			r9[sLSTPCQ]=null
 			r9[sLSTPCSNT]=null
 			ts=[]+schedules
@@ -3739,14 +3742,14 @@ private void updateLogs(Map r9,Long lastExecute=null){
 			if(lim==iZ || lsz==iZ)logs=[]
 			else{
 				if(lim< lsz-i1){
-					logs=logs[iZ..lim]
+					logs=logs[iZ..<lim]
 					lsz=logs.size()
 				}
 				if(lsz>i50){
 					assignSt(s,logs) //	this mixes state and AS
 					if(gtState().toString().size()>75000){
 						lim-=Math.min(i50,(lim/d2).toInteger())
-						logs=logs[iZ..lim]
+						logs=logs[iZ..<lim]
 					}
 				}
 			}
@@ -6833,7 +6836,6 @@ private Long vcmd_appendFile(Map r9,device,List prms){
 		}
 	}
 	readTmpFLD[pNm]=sNL
-	data=sNL
 	return lZ
 }
 
@@ -7778,9 +7780,10 @@ private Boolean evaluateCondition(Map r9,Map cndtn,String collection,Boolean asy
 
 	//true/false actions
 	List<Map> ts= cndtn[sTS]!=null ? liMs(cndtn,sTS):[]
-	if(ts.size()!=iZ && (res || ffwd(r9))) executeStatements(r9,ts,async)
+	Boolean wasFwd=ffwd(r9)
+	if(ts.size()!=iZ && (res || wasFwd)) executeStatements(r9,ts,async)
 	List<Map> fs= cndtn[sFS]!=null ? liMs(cndtn,sFS):[]
-	if(fs.size()!=iZ && (!res || ffwd(r9))) executeStatements(r9,fs,async)
+	if(fs.size()!=iZ && (!res || (wasFwd && ffwd(r9)))) executeStatements(r9,fs,async)
 
 	//restore condition id
 	((Map)r9[sSTACK])[sC]=c
@@ -10942,10 +10945,10 @@ private doExprMath(Map r9,String o,String t,v1,v2){
 			v=(v2!=dZ ? v1/v2:dZ)
 			break
 		case sMOD1:
-			v=Math.floor(v2!=iZ ? v1/v2:dZ).toInteger()
+			v=Math.floor(v2!=iZ ? v1/v2:dZ).toLong()
 			break
 		case sMOD:
-			v=(Integer)(v2!=iZ ? v1%v2:iZ)
+			v=(Long)(v2!=iZ ? v1%v2:lZ)
 			break
 		case sPWR:
 			v=v1 ** v2
@@ -12506,7 +12509,7 @@ private Map func_distance(Map r9,List<Map> prms){
 private static Map func_json(Map r9,List<Map> prms){
 	if(badParams(prms,i1) || prms.size()>i2)return rtnErr('json(value[, format])')
 	JsonBuilder builder=new JsonBuilder( [ oMv(prms[iZ]) ] )
-	String op=prms[i1] ? 'toPrettyString':'toString'
+	String op=prms.size()>i1 && prms[i1] ? 'toPrettyString':'toString'
 	String json=builder."${op}"()
 	rtnMapS(json[i1..-i2].trim())
 }
@@ -12624,7 +12627,7 @@ private static com_cast(ival,String dataType,String srcDt){
 		case sDEC:
 			switch(srcDt){
 				case sSTR:
-					String s=((String)value).replaceAll(/[^-\d.-E]/,sBLK)
+					String s=((String)value).replaceAll(/[^-\d.eE]/,sBLK)
 					if(s.isDouble() || s.isFloat())
 						return s.toDouble()
 					if(s.isLong())
@@ -12646,7 +12649,7 @@ private static com_cast(ival,String dataType,String srcDt){
 		case sINT:
 			switch(srcDt){
 				case sSTR:
-					String s=((String)value).replaceAll(/[^-\d.-E]/,sBLK)
+					String s=((String)value).replaceAll(/[^-\d.eE]/,sBLK)
 					if(s.isInteger())
 						return s.toInteger()
 					if(s.isFloat())
@@ -12681,7 +12684,7 @@ private static com_cast(ival,String dataType,String srcDt){
 		case sLONG:
 			switch(srcDt){
 				case sSTR:
-					String s=((String)value).replaceAll(/[^-\d.-E]/,sBLK)
+					String s=((String)value).replaceAll(/[^-\d.eE]/,sBLK)
 					if(s.isLong() || s.isInteger())
 						return s.toLong()
 					if(s.isFloat())
@@ -14234,7 +14237,7 @@ private static String hashId2(id,String wName){
 	return r
 }
 
-@Field static Semaphore theMBLockFLD=new Semaphore(0)
+@Field static Semaphore theMBLockFLD=new Semaphore(1)
 
 // Memory Barrier
 @CompileStatic
