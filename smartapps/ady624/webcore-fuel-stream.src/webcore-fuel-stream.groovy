@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update May 30, 2024 for Hubitat
+ *  Last update June 28, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -747,7 +747,7 @@ Map findStream(String name){
  * Clear fuel stream settings (for cases only a single data can be used)
  * @param multiple
  */
-void clearFvarn(String fvarn, Boolean multiple){
+Boolean clearFvarn(String fvarn, Boolean multiple){
 	//String fvarn=multiple ? 'fstreams' : 'fstream_'
 	def fl= gtSetting(fvarn)
 	if(fl){
@@ -766,18 +766,21 @@ void clearFvarn(String fvarn, Boolean multiple){
 			}
 		}
 		wremoveSetting(fvarn)
+		return true
 	}
+	return false
 }
 
 /**
  * Clear sensor settings (for cases only a single data can be used)
  * @param multiple
  */
-void clearVarn(Boolean multiple){
+Boolean clearVarn(Boolean multiple){
 	String varn=multiple ? 'sensors' : 'sensor_'
 	String attrn
 	attrn= multiple ? sNL : 'attribute_'
 	def sl= gtSetting(varn)
+	Boolean dirty=false
 	if(sl){
 		List items= multiple ? (List)sl : [sl]
 		for(sensor in items){
@@ -801,13 +804,16 @@ void clearVarn(Boolean multiple){
 			}
 		}
 		wremoveSetting(varn)
+		dirty=true
 	}
 	if(attrn && gtSetting(attrn)){
 		wremoveSetting(attrn)
+		dirty=true
 	}
+	return dirty
 }
 
-void clearQuants(){
+Boolean clearQuants(){
 	Integer i
 	String sb
 	for(i=iZ; i<i10; i++){
@@ -820,6 +826,7 @@ void clearQuants(){
 		wremoveSetting(sid+'_type')
 		wremoveSetting(sid)
 	}
+	return true
 }
 
 Boolean hasQuants(){
@@ -1417,7 +1424,8 @@ def gatherDataSources(Boolean multiple=true, Boolean ordered=false, Boolean allo
 		sl= gtSetting(varn)
 
 		// fuel streams
-		if(!multiple && (sl || hq) ) clearFvarn(fvarn,multiple)
+		Boolean dirty=false
+		if(!multiple && (sl || hq) ) dirty |= clearFvarn(fvarn,multiple)
 
 		if(multiple || (!multiple && !sl && !hq)){
 			gatherFuelSource(fvarn,ftit,multiple,allowLastActivity)
@@ -1426,7 +1434,7 @@ def gatherDataSources(Boolean multiple=true, Boolean ordered=false, Boolean allo
 		fl= gtSetting(fvarn)
 
 		// sensors
-		if(!multiple && (fl || hq) ) clearVarn(multiple)
+		if(!multiple && (fl || hq) ) dirty |= clearVarn(multiple)
 
 		if(multiple || (!multiple && !fl && !hq)){
 			String attrn=multiple ? "attributes_": "attribute_"
@@ -1437,7 +1445,7 @@ def gatherDataSources(Boolean multiple=true, Boolean ordered=false, Boolean allo
 		fl= gtSetting(fvarn)
 
 		// calculated, virtual, quant
-		if(!multiple && (fl || sl) ) clearQuants()
+		if(!multiple && (fl || sl) ) dirty |= clearQuants()
 
 		if(multiple || (!multiple && !fl && !sl)){
 			gatherQuantSource(multiple,allowLastActivity)
@@ -1449,7 +1457,7 @@ def gatherDataSources(Boolean multiple=true, Boolean ordered=false, Boolean allo
  */
 	state.remove('lastOrder')
 
-	List<Map> dataSources= createDataSources(multiple)
+	List<Map> dataSources= dirty ? createDataSources(multiple) : a
 
 	Integer sz=dataSources.size()
 
@@ -1844,7 +1852,7 @@ List<Map> gtDataSourceData(Map ent, Boolean multiple=true, String sensorV=sNL){
 
 
 def doFile(String file,String typ='text/javascript'){
-	String filename_= isSystemType() ? 'webcore/': '' + file
+	String filename_= (isSystemType() ? 'webcore/' : '') + file
 	String ts1= " for ($filename_}"
 	Boolean ok= lowReadFile(filename_,ts1)
 	if(ok){
@@ -4653,63 +4661,41 @@ Map getOptions_timegraph(){
 	Integer count_
 	count_=iZ
 
-//	TODO
 	List<Map> dataSources=gtDataSources()
 	if(dataSources){
 		for(Map ent in dataSources){
 
 			String sid=sMs(ent,sID)
 			String attribute=sMs(ent,sA)
-			String sa= "${sid}_${attribute}".toString()
+			String sa="${sid}_${attribute}".toString()
 
-			String type_
-			type_= settings["graph_type_${sa}"] != null ? gtSetStr("graph_type_${sa}").toLowerCase() : 'line'
-			if(type_ == "stepped") type_="steppedArea"
-			Integer axes_=settings["graph_axis_number_${sa}"] == "Left" ? iZ : i1
+			String type_=settings["graph_type_${sa}"] != null ? gtSetStr("graph_type_${sa}").toLowerCase() : 'line'
+			if(type_=="stepped") type_="steppedArea"
+			Integer axes_=settings["graph_axis_number_${sa}"]=="Left" ? iZ : i1
 			String stroke_color=gtSetStr("var_${sa}_stroke_color")
 			String stroke_opacity=gtSetStr("var_${sa}_stroke_opacity")
-			//def stroke_line_size=settings["var_${sa}_stroke_line_size"]
-			//String fill_color=settings["var_${sa}_fill_color"]
-			//String fill_opacity=settings["var_${sa}_fill_opacity"]
 			def point_size=settings["var_${sa}_point_size"]
 			String point_type=settings["var_${sa}_point_type"] != null ? gtSetStr("var_${sa}_point_type").toLowerCase() : sBLK
-
 			type_=type_=='bar' ? 'bars' : type_
 
-			options.graphOptions.series << [(count_.toString()) : [
-					"type"			: type_,
-					"targetAxisIndex" : axes_,
-					"pointSize"	: point_size,
-					"pointShape"	: point_type,
-					"color"		: stroke_color,
-					"opacity"	: stroke_opacity,
+			options.graphOptions.series << [(count_.toString()): [
+					"type"           : type_,
+					"targetAxisIndex": axes_,
+					"pointSize"      : point_size,
+					"pointShape"     : point_type,
+					"color"          : stroke_color,
+					"opacity"        : stroke_opacity,
 				]
 			]
 			count_++
-		}
-	}
 
-//	TODO
-
-	if(dataSources){
-		for(Map ent in dataSources){
-
-			String sid=sMs(ent,sID)
-			String attribute=sMs(ent,sA)
-			String sa= "${sid}_${attribute}".toString()
-
-	//add colors and thicknesses
-			Integer axis=settings["graph_axis_number_${sa}"] == "Left" ? iZ : i1
-			String tc= "graph_line_${sa}_color"
+			String tc="graph_line_${sa}_color"
 			String text_color=gtSetStr(tc)
 			Boolean text_color_transparent=gtSetB(tc+"_transparent")
-
-			Map annotations=[
-					"targetAxisIndex": axis,
-					"color": text_color_transparent ? sTRANSPRNT : text_color
+			options.graphOptions.series << [
+					"targetAxisIndex": axes_,
+					"color"          : text_color_transparent ? sTRANSPRNT : text_color
 			]
-
-			options.graphOptions.series << annotations
 		}
 	}
 
@@ -9328,18 +9314,14 @@ def applyConversion(Map tile, ival){
 		[(sNM): "overcast clouds",					(sICON): "weather-cloudy"]
 ]
 
+@Field final Map<String,String> pairingsMapFLD=pairingsFLD.collectEntries{ Map el -> [ ((String)el[sNM]) : (String)el[sICON] ] }
+
 List<String> translateCondition(Map tile, String condition){
-
-	//String icon="mdi-weather-sunny-off"
-
-	List return_val
 	try{
-		Date now
-		now=new Date()
+		Date now=new Date()
 		String period=sMs(tile,'period')
 		List<String> timeframe=period.split("\\.")
-		Boolean round_hour
-		round_hour=false
+		Boolean round_hour=false
 
 		if(timeframe[iZ] == "hourly"){
 			round_hour=true
@@ -9349,21 +9331,15 @@ List<String> translateCondition(Map tile, String condition){
 			}
 		}
 
-		String check_condition
-		check_condition=condition
+		String check_condition=condition
 		if(isNight(now, round_hour)){
 			check_condition+=" night"
 		}
-		return [sICON, pairingsFLD.find{Map<String,String> el->  sMs(el,sNM) == check_condition}[sICON]]
-
+		String icon=(String)pairingsMapFLD[check_condition] ?: (String)pairingsMapFLD[condition] ?: "alert-circle"
+		return [sICON, icon]
 	}catch(ignored){}
 
-	try{
-		return [sICON, pairingsFLD.find{Map<String,String> el->  sMs(el,sNM) == condition}[sICON]]
-	}catch(ignored){}
-
-	return_val=[sICON, "alert-circle"]
-	return return_val
+	return [sICON, "alert-circle"]
 }
 
 List<String> formatNumericData(Map tile, ival){
@@ -11252,12 +11228,12 @@ Boolean isStorage(id, String attribute){
 
 /** LTS only called by parent is LTS stream with quant enabled?*/
 Boolean isQuant(id, String attribute){
-	if(isStorage(id,attribute)){
-		def sensor=sensors?.find{it.id == id}
-		if(sensor){
-			String s= "${gtSensorId(sensor)}_${attribute}_quantization"
-			String ts1= s+"_function"
-			return !(settings[ts1]==sNONE || settings[s]==null || settings[s]==s0)
+	def sensor=sensors?.find{it.id == id}
+	if(sensor){
+		List<String> att=(List<String>)settings["${id}_attributes"]
+		if(att?.find{ it == attribute } != null){
+			String s="${gtSensorId(sensor)}_${attribute}_quantization"
+			return !(settings[s+"_function"]==sNONE || settings[s]==null || settings[s]==s0)
 		}
 	}
 	return false
@@ -11279,10 +11255,12 @@ void updateData_LTS(Map data){
 		String pNm=sAppId()
 
 		while(true){
-			def sensor=sensors?.find{ it.id == theEvent.id }
-			if(sensor) appendFile_LTS(sensor, sMs(theEvent,sATTR))
-			else warn "Sensor not found ${theEvent}",null
-			theEvent=null
+			if(theEvent){
+				def sensor=sensors?.find{ it.id == theEvent.id }
+				if(sensor) appendFile_LTS(sensor, sMs(theEvent,sATTR))
+				else warn "Sensor not found ${theEvent}",null
+				theEvent=null
+			}
 
 			getTheLock(pNm,'update Data')
 			List<Map> evtQ
@@ -11296,15 +11274,16 @@ void updateData_LTS(Map data){
 				releaseTheLock(pNm)
 				break
 			}else{
-				evtQ=theQueuesVFLD[pNm]
-				List<Map>evtList=evtQ //.sort{ Map it -> lMt(it) }
-				theEvent=evtList.remove(0)
-				Integer qsize=evtList.size()
-				theQueuesVFLD[pNm]=evtList
+				Integer qsize=evtQ.size()
+				if(qsize>i20)warn "large queue size ${qsize}".toString(),null
+				theQueuesVFLD[pNm]=[]
 				theQueuesVFLD=theQueuesVFLD
 				releaseTheLock(pNm)
-
-				if(qsize>i20)warn "large queue size ${qsize}".toString(),null
+				for(Map nextEvt in evtQ){
+					def sensor=sensors?.find{ it.id == nextEvt.id }
+					if(sensor) appendFile_LTS(sensor, sMs(nextEvt,sATTR))
+					else warn "Sensor not found ${nextEvt}",null
+				}
 			}
 		}
 	}
@@ -11601,8 +11580,8 @@ List quantizeData(List<Map> events, String mins, String funct, Integer dec, Bool
 	newEvents=[]
 	try{
 
-		Long stop
-		stop=roundDate([(sDT): dtMdt(events[iZ]), granularity: minutes, boundary: boundary]).getTime() + milliSeconds
+		Map<String,Object> roundParams= [(sDT): dtMdt(events[iZ]), granularity: minutes, boundary: boundary] as Map<String, Object>
+		Long stop=roundDate(roundParams).getTime() + milliSeconds
 
 		List<Map> tempEvents
 		tempEvents=[]
@@ -11613,7 +11592,8 @@ List quantizeData(List<Map> events, String mins, String funct, Integer dec, Bool
 		Long currTime
 
 		while (idx < events.size()){
-			currTime=roundDate([(sDT): events[idx][sDT], granularity: minutes, boundary: boundary]).getTime()
+			roundParams[sDT]= events[idx][sDT]
+			currTime=roundDate(roundParams).getTime()
 
 			if(currTime > stop){
 				sz=tempEvents.size()
@@ -11807,7 +11787,6 @@ static Boolean isFNF(Exception ex){
 Boolean lowReadFile(String fname,String ts1){
 	String pNm=fname
 	readTmpFLD[pNm]=sBLK
-	readTmpFLD= readTmpFLD
 	try{
 		if((String)location.hub.firmwareVersionString >= minFwVersion){
 			readTmpBFLD[pNm]=null
@@ -11829,14 +11808,13 @@ Boolean lowReadFile(String fname,String ts1){
 
 			httpGet(params){ resp ->
 				if(resp.status==200 && resp.data){
-					Integer i
-					char c
-					i=resp.data.read()
+					StringBuilder sb=new StringBuilder()
+					Integer i=resp.data.read()
 					while(i!=-1){
-						c=(char)i
-						readTmpFLD[pNm]+=c
+						sb.append(i as char)
 						i=resp.data.read()
 					}
+					readTmpFLD[pNm]=sb.toString()
 					//log.warn "pNm: ${pNm} data: ${data} file: ${readDataFLD[pNm]}"
 				}else{
 					error "Read Response status $resp.status",null
@@ -11937,21 +11915,12 @@ List<Map> pruneData(List<Map> input_data, Integer days){
 		if(isE)myDetail null,"pruneData nochange"
 		return input_data
 	}
-	List return_data=[]+input_data
-	if(input_data.size() > 0){
 
-		Long startDate; startDate=wnow()
-		startDate -= (days * lMSDAY)
+	Long startDate= wnow() - (days * lMSDAY)
+	int cutoff= input_data.findIndexOf{ lMt((Map)it) >= startDate }
+	if(cutoff < 0) cutoff= input_data.size()
 
-		Long date
-		date= lMt(input_data[iZ])
-
-		while (date && return_data && date < startDate){
-			if(isE)debug "date: $date startDate: $startDate return_data[0]: ${return_data[iZ]}",null
-			Map a=return_data.remove(0)
-			date=return_data ? lMt(return_data[iZ]) : null
-		}
-	}
+	List<Map> return_data= (List<Map>)([] + input_data.subList(cutoff, input_data.size()))
 	if(isE)myDetail null,"pruneData ${return_data.size()} time: $days"
 	return return_data
 }
@@ -13936,37 +13905,24 @@ List<Map> hubiTools_get_order(String order){
 Boolean hubiTools_check_list(List<Map> dataSources, List<Map> list_){
 	if(isEric())myDetail null,"_check_list $dataSources $list_",i1
 
-	Boolean result; result=true
-	Integer count_; count_=iZ
-	Integer sz; sz=list_.size()
-	//check for addition/changes
-	if(dataSources){
-		Boolean inner_result
-		Integer i
+	Integer dsSz=dataSources ? dataSources.size() : iZ
+	Boolean count_result=(dsSz == list_.size())
+
+	Boolean result; result=count_result
+	if(result && dataSources){
+		Set<String> keys=new HashSet<String>(list_.size())
+		for(Map entry in list_)
+			keys << "${sMs(entry,sID)}_${sMs(entry,sATTR)}".toString()
 		for(Map ent in dataSources){
-
-			String sid=sMs(ent,sID)
-			String attribute=sMs(ent,sA)
-
-			count_++
-			inner_result=false
-			for(i=iZ; i<sz; i++){
-				if(sMs(list_[i],sID) == sid && sMs(list_[i],sATTR) == attribute){
-					inner_result=true
-					break
-				}
+			if(!keys.contains("${sMs(ent,sID)}_${sMs(ent,sA)}")){
+				result=false
+				break
 			}
-			result=result && inner_result
 		}
 	}
 
-	//check for smaller
-	Boolean count_result; count_result=false
-	if(sz == count_)
-		count_result=true
-
 	if(isEric())myDetail null,"_check_list $result $count_result"
-	return (result && count_result)
+	return result
 }
 
 
@@ -14430,8 +14386,11 @@ Boolean getTheLockW(String qname,String meth=sNL,Boolean longWait=false){
 		wpauseExecution(waitT)
 		wait=true
 		if(elapseT(t)>30000L){
-			releaseTheLock(qname)
+			sema.drainPermits()
+			lockTimesVFLD[semaSNum]=(Long)null
+			lockTimesVFLD=lockTimesVFLD
 			if(isEric())warn "overriding lock $meth",null
+			break
 		}
 	}
 	lockTimesVFLD[semaSNum]=wnow()
@@ -14450,7 +14409,7 @@ static void releaseTheLock(String qname){
 	lockTimesVFLD=lockTimesVFLD
 //	lockHolderVFLD[semaSNum]=sNL
 //	lockHolderVFLD=lockHolderVFLD
-	sema.release()
+	if(sema.availablePermits()==0) sema.release()
 }
 
 void clearSema(){
@@ -14607,6 +14566,7 @@ static String string2gzip(String s){
 def gforward(String path){
 	String ep; ep = path
 	if(ep.endsWith(sDIV))ep=ep.substring(iZ,ep.length()-i1)
+	// getGraph or getTile
 	if(ep in ['graph', 'tile']) ep='get'+ep.capitalize()
 	if(isDbg()) myDetail null,"forwarding to $ep",iN2
 	"${ep}"()

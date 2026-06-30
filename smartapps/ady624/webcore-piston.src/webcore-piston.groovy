@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update June 25, 2026 for Hubitat
+ * Last update June 28, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -944,11 +944,11 @@ static String doLineStrt(Integer level,List<Boolean>newLevel){
 
 @CompileStatic
 static String dumpListDesc(List data,Integer level,List<Boolean> lastLevel,String listLabel,Boolean html=false,Boolean reorder=true){
-	String str; str=sBLK
+	StringBuilder sb=new StringBuilder()
 	Integer n; n=i1
 	List<Boolean> newLevel=lastLevel
 
-	List list1=data?.collect{it}
+	List list1=data ?: []
 	Integer sz=list1.size()
 	for(Object par in list1){
 		String lbl=listLabel+"[${n-i1}]".toString()
@@ -957,27 +957,27 @@ static String dumpListDesc(List data,Integer level,List<Boolean> lastLevel,Strin
 			newmap[lbl]=(Map)par
 			Boolean t1=n==sz
 			newLevel[level]=t1
-			str+=dumpMapDesc(newmap,level,newLevel,n,sz,!t1,html,reorder)
+			sb.append(dumpMapDesc(newmap,level,newLevel,n,sz,!t1,html,reorder))
 		}else if(par instanceof List || par instanceof ArrayList){
 			Map<String,Object> newmap=[:]
 			newmap[lbl]=par
 			Boolean t1=n==sz
 			newLevel[level]=t1
-			str+=dumpMapDesc(newmap,level,newLevel,n,sz,!t1,html,reorder)
+			sb.append(dumpMapDesc(newmap,level,newLevel,n,sz,!t1,html,reorder))
 		}else{
 			String lineStrt
 			lineStrt=doLineStrt(level,lastLevel)
 			lineStrt+=n==i1 && sz>i1 ? sSPCST:(n<sz ? sSPCSM:sSPCSE)
-			str+=spanStr(html, lineStrt+lbl+": ${par} (${objType(par)})".toString() )
+			sb.append(spanStr(html, lineStrt+lbl+": ${par} (${objType(par)})".toString()))
 		}
 		n+=i1
 	}
-	return str
+	return sb.toString()
 }
 
 @CompileStatic
 static String dumpMapDesc(Map<String,Object> data,Integer level,List<Boolean> lastLevel,Integer listCnt=null,Integer listSz=null,Boolean listCall=false,Boolean html=false,Boolean reorder=true){
-	String str; str=sBLK
+	StringBuilder sb=new StringBuilder()
 	Integer n; n=i1
 	Integer sz=data?.size()
 	Map<String,Object> svMap,svLMap,newMap; svMap=[:]; svLMap=[:]; newMap=[:]
@@ -1010,21 +1010,21 @@ static String dumpMapDesc(Map<String,Object> data,Integer level,List<Boolean> la
 		def v=par.value
 		String objType=objType(v)
 		if(v instanceof Map){
-			str+=spanStr(html, lineStrt+"${k}: (${objType})".toString() )
+			sb.append(spanStr(html, lineStrt+"${k}: (${objType})".toString()))
 			newLevel[lvlpls]=theLast
-			str+=dumpMapDesc((Map)v,lvlpls,newLevel,null,null,false,html,reorder)
+			sb.append(dumpMapDesc((Map)v,lvlpls,newLevel,null,null,false,html,reorder))
 		}
 		else if(v instanceof List || v instanceof ArrayList){
-			str+=spanStr(html, lineStrt+"${k}: [${objType}]".toString() )
+			sb.append(spanStr(html, lineStrt+"${k}: [${objType}]".toString()))
 			newLevel[lvlpls]=theLast
-			str+=dumpListDesc((List)v,lvlpls,newLevel,sBLK,html,reorder)
+			sb.append(dumpListDesc((List)v,lvlpls,newLevel,sBLK,html,reorder))
 		}
 		else{
-			str+=spanStr(html, lineStrt+"${k}: (${v}) (${objType})".toString() )
+			sb.append(spanStr(html, lineStrt+"${k}: (${v}) (${objType})".toString()))
 		}
 		n+=i1
 	}
-	return str
+	return sb.toString()
 }
 
 @CompileStatic
@@ -1113,12 +1113,13 @@ void uninstalled(){
 
 void initialize(){
 	svSunTFLD=[:]; mb()
+	Map mst=gtState()
 	String tt1=(String)gtSetting(sLOGNG)
-	Integer tt2=iMs(gtState(),sLOGNG) ?: iZ
+	Integer tt2=iMs(mst,sLOGNG) ?: iZ
 	String tt3=tt2.toString()
 	if(tt1==sNL) setLoggingLevel(tt2 ? tt3:s0,false)
 	else if(tt1!=tt3) setLoggingLevel(tt1,false)
-	if(bIs(gtState(),sACT)) resumeP()
+	if(bIs(mst,sACT)) resumeP()
 	else clearMyCache('initialize')
 }
 
@@ -1241,6 +1242,7 @@ private static String decodeEmoji(String value){
 }
 
 @Field static Map<String,Map> thePistonCacheFLD=[:]
+@Field static volatile Map<String,List<String>> anyOfCacheFLD=[:]
 
 /** clear piston code cache */
 private void clearMyPiston(String meth=sNL){
@@ -1364,11 +1366,13 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 	Map r9; r9=[:]
 	r9[sPISTN]=piston
 	releaseTheLock(mSmaNm)
-	Integer i= iMs(gtState(),sBLD)
-	Boolean b= bIs(gtState(),sACT)
+	Map mst=gtState()
+	Integer i= iMs(mst,sBLD)
+	Boolean b= bIs(mst,sACT)
 	if(i==i1 || b)r9= resumeP(piston,false)
 	else clearMyCache(meth)
-	return [(sACT):b,(sBLD):i,(sMODFD):lMs(gtState(),sMODFD),(sST):mMs(gtState(),sST),rtData:r9]
+	mst=gtState()
+	return [(sACT):b,(sBLD):i,(sMODFD):lMs(mst,sMODFD),(sST):mMs(mst,sST),rtData:r9]
 }
 
 @CompileStatic
@@ -1720,9 +1724,10 @@ private void cleanCode(Map i,Boolean inMem){
 
 		if(item[sCO]!=null){
 			String co=sMs(item,sCO)
+			Map cmps=Comparisons()
 			Map comparison
-			comparison=Comparisons()[sCONDITIONS][co]
-			if(comparison==null) comparison=Comparisons()[sTRIGGERS][co]
+			comparison=cmps[sCONDITIONS][co]
+			if(comparison==null) comparison=cmps[sTRIGGERS][co]
 			if(comparison!=null){
 				Integer pCnt= comparison[sP]!=null ? iMs(comparison,sP):iZ
 				Integer tCnt= comparison[sT]!=null ? iMs(comparison,sT):iZ
@@ -1995,8 +2000,11 @@ Boolean getTheLockW(String qname,String meth=sNL,Boolean longWait=false){
 		wpauseExecution(waitT)
 		wait=true
 		if(elapseT(t)>30000L){
-			releaseTheLock(qname)
+			sema.drainPermits()
+			lockTimesVFLD[semaSNum]=(Long)null
+			lockTimesVFLD=lockTimesVFLD
 			if(eric())warn "overriding lock $meth",null
+			break
 		}
 	}
 	lockTimesVFLD[semaSNum]=wnow()
@@ -2015,7 +2023,7 @@ void releaseTheLock(String qname){
 	lockTimesVFLD=lockTimesVFLD
 //	lockHolderVFLD[semaSNum]=sNL
 //	lockHolderVFLD=lockHolderVFLD
-	sema.release()
+	if(sema.availablePermits()==0) sema.release()
 }
 
 @Field static Semaphore theLock0FLD=new Semaphore(1)
@@ -2346,7 +2354,7 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 
 		Map m0,aS
 		List l0
-		aS=isPep(t1)? gtCachedAtomicState():gtState()
+		aS=isPep(t1)? gtCachedAtomicState():mst
 		m0=mMs(aS,sCACHE); t1[sCACHE]=m0 ? m0:[:]
 		m0=mMs(aS,sSTORE); t1[sSTORE]=m0 ? m0:[:]
 		m0=mMs(aS,sST); t1[sST]=m0 ? m0:[:]
@@ -2416,15 +2424,12 @@ void clearParentCache(String meth=sNL){
 	String semName=sTSLF
 	String wName=sPAppId()
 	getTheLock(semName,lockTyp,true)
-
 	theParentCacheVFLD[wName]=null
 	theParentCacheVFLD=theParentCacheVFLD
-
 	theCacheVFLD=[:] // reset all pistons cache
 	clearHashMap(wName)
-	loadCDB()
-
 	releaseTheLock(semName)
+	loadCDB()
 	if(eric())doLog(sDBG,"clearing parent cache and all piston caches $meth")
 }
 
@@ -2455,41 +2460,40 @@ private LinkedHashMap getParentCache(){
 	LinkedHashMap res
 	res=theParentCacheVFLD[wName]
 	if(res==null){
+		Map t0=wgtPdata()
+		String lpe= sLOGPE
+		String aid= 'accountId'
+		Map t1=[
+			('coreVersion'): sMs(t0,'sCv'),
+			(sHCOREVER): sMs(t0,'sHv'),
+			(sPWRSRC): sMs(t0,sPWRSRC),
+			(sREGION): sMs(t0,sREGION),
+			(sINSTID): sMs(t0,sINSTID),
+			(sSETTINGS): mMs(t0,'stsettings'),
+			(sENABLED): isEnbl(t0),
+			(sLIFX): mMs(t0,sLIFX),
+			(lpe): bIs(t0,lpe),
+			(aid): sMs(t0,aid),
+			(sNACCTSID): bIs(t0,sNACCTSID),
+			(sLOCID): sMs(t0,sLOCID),
+			(sOLDLOC): (List)t0[sOLDLOC],
+			(sALLLOC): (List)t0[sALLLOC],
+			(sINCIDENTS): (List)t0[sINCIDENTS],
+			(sUSELFUELS): bIs(t0,sUSELFUELS)
+		]
 		String semName=sTSLF
+		Boolean sendM; sendM=false
 		getTheLock(semName,sGETPCACHE,true)
 		res=theParentCacheVFLD[wName]
-		Boolean sendM; sendM=false
 		if(res==null){
-			Map t0=wgtPdata()
-			Map t1
-			String lpe= sLOGPE
-			String aid= 'accountId'
-			t1=[
-				('coreVersion'): sMs(t0,'sCv'),
-				(sHCOREVER): sMs(t0,'sHv'),
-				(sPWRSRC): sMs(t0,sPWRSRC),
-				(sREGION): sMs(t0,sREGION),
-				(sINSTID): sMs(t0,sINSTID),
-				(sSETTINGS): mMs(t0,'stsettings'),
-				(sENABLED): isEnbl(t0),
-				(sLIFX): mMs(t0,sLIFX),
-				(lpe): bIs(t0,lpe),
-				(aid): sMs(t0,aid),
-				(sNACCTSID): bIs(t0,sNACCTSID),
-				(sLOCID): sMs(t0,sLOCID),
-				(sOLDLOC): (List)t0[sOLDLOC],
-				(sALLLOC): (List)t0[sALLLOC],
-				(sINCIDENTS): (List)t0[sINCIDENTS],
-				(sUSELFUELS): bIs(t0,sUSELFUELS)
-			]
 			res=t1
 			theParentCacheVFLD[wName]=t1
 			theParentCacheVFLD=theParentCacheVFLD
 			clearHashMap(wName)
-			t1=null
 			sendM=true
 		}
 		releaseTheLock(semName)
+		t1=null
 		if(eric() && sendM)debug 'gathering parent cache',null
 	}
 	return res
@@ -2913,7 +2917,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		Long missing=t0-t1-t2-stAccess
 		Long t4=le-startTime
 		Long t5=theend-le
-		String Msg= "Runtime (${"$r9".size()} bytes) initialized ".toString()
+		String Msg= "Runtime (${r9.size()} keys) initialized ".toString()
 		String adMsg= lg>i2 || eric() ? "${t0} LockT > ${t1}ms > r9T > ${t2}ms > pistonT > ${t3}ms (first state access ${stAccess} m:${missing} $t4 $t5)".toString() : sBLK
 		if(lg>i2)debug Msg+adMsg+" (${sHVER})".toString(),r9
 		else trace Msg+"in ${t1+t2+t3}ms (${sHVER}) ".toString()+adMsg,r9
@@ -3443,6 +3447,9 @@ private Boolean executeEvent(Map r9,Map event){
 private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 	Long startTime=wnow()
 	Boolean myPep=isPep(r9)
+	String myId=sMs(r9,snId)
+	String mSmaNm=myId
+	Map t0=getCachedMaps(sFINLZ)
 
 	processSchedules(r9,true)
 //	Long el1=elapseT(startTime)
@@ -3462,9 +3469,6 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 
 //	Long el3=elapseT(startTime)
 	//overwrite state might have changed meanwhile
-	Map t0; t0=getCachedMaps(sFINLZ)
-	String myId=sMs(r9,snId)
-	String mSmaNm=myId
 	if(t0!=null){
 		getTheLock(mSmaNm,sFINLZ)
 		Map nc=theCacheVFLD[myId]
@@ -3566,7 +3570,6 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 	if(myPep)assignAS(s,stats) else assignSt(s,stats)
 	((Map)r9[s])[sTIMING]=null
 
-	t0=getCachedMaps(sFINLZ+s1)
 	if(t0!=null){
 
 		s=sFINLZ+s1
@@ -3646,9 +3649,26 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 		//cancel statements
 		if(ts){
 			List<Map>cncStmts= liMs(cncls,sSTMTS)
-			schedules.removeAll{ Map schedule ->
-				!!cncStmts.find{ Map cancelation ->
-					(iMs(cancelation,sID)==iMsS(schedule)) && (!cancelation[sDATA] || sMs(cancelation,sDATA)==sMs(schedule,sD))
+			if(cncStmts){
+				Set<Integer> cncIds=new HashSet<Integer>()
+				Map<Integer,Set<String>> cncDataIds=[:]
+				for(Map cancelation in cncStmts){
+					Integer cid=iMs(cancelation,sID)
+					String cdata=sMs(cancelation,sDATA)
+					if(!cdata){ cncIds << cid }
+					else{
+						if(!cncDataIds[cid]) cncDataIds[cid]=new HashSet<String>()
+						cncDataIds[cid] << cdata
+					}
+				}
+				final String dtt = sD // compiler bug?
+				schedules.removeAll{ Map schedule ->
+					Integer sid=iMsS(schedule)
+					if(cncIds.contains(sid)) return true
+					Set<String> ds=(Set<String>)cncDataIds[sid]
+					if(!ds) return false
+					def dval=schedule[dtt]
+					return dval instanceof String && ds.contains((String)dval)
 				}
 			}
 			ts=[]+schedules
@@ -3704,7 +3724,6 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 
 @Field static final String sUPDL='updateLogs'
 /** store this run logs to persistent state and update caches */
-@CompileStatic
 private void updateLogs(Map r9,Long lastExecute=null){
 	if(!r9)return
 
@@ -3747,7 +3766,7 @@ private void updateLogs(Map r9,Long lastExecute=null){
 				}
 				if(lsz>i50){
 					assignSt(s,logs) //	this mixes state and AS
-					if(gtState().toString().size()>75000){
+					if(state.toString().length()>75000){
 						lim-=Math.min(i50,(lim/d2).toInteger())
 						logs=logs[iZ..<lim]
 					}
@@ -4250,7 +4269,8 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 
 @CompileStatic
 private static Long calcDel(Long overBy){
-	return overBy>lMs(gtPLimits(),sLONGLIMTIME) ? lMs(gtPLimits(),sLONGDEL):lMs(gtPLimits(),sSHORTDEL)
+	Map pl=gtPLimits()
+	return overBy>lMs(pl,sLONGLIMTIME) ? lMs(pl,sLONGDEL):lMs(pl,sSHORTDEL)
 }
 
 @Field static final String sTPAUSE='tPause'
@@ -4694,11 +4714,9 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 		mySt="stmt: ${iTD} lo:${tlo} lo2: ${tlo2} lo3: ${tlo3} lastRun: $lastRun "
 
 	//if already scheduled once during run, don't do it again
-	Boolean fnd; fnd=false
 	List<Map> schedules=sgetSchedules(sEXST,myPep)
-	//String i=sI; Integer in1=iN1 // compiler bug
-	if(schedules.find{ Map it -> iMsS(it)==iTD /* && iMs(it,i)==in1*/ }){ fnd=true }
-	if(sgtSch(r9).find{ Map it -> iMsS(it)==iTD }){ fnd=true }
+	Boolean fnd=schedules.find{ Map it -> iMsS(it)==iTD } != null ||
+	            sgtSch(r9).find{ Map it -> iMsS(it)==iTD } != null
 	if(fnd){
 		if(lge) myDetail r9,mySt1+'FOUND EXISTING TIMER '+mySt,iN2
 		return
@@ -5034,10 +5052,11 @@ private void scheduleTimeCondition(Map r9,Map cndtn){
 		return
 	}
 	String co=sMs(cndtn,sCO)
-	Map comparison; comparison=Comparisons()[sCONDITIONS][co]
+	Map cmps=Comparisons()
+	Map comparison; comparison=cmps[sCONDITIONS][co]
 	Boolean trigger; trigger=false
 	if(comparison==null){
-		comparison=Comparisons()[sTRIGGERS][co]
+		comparison=cmps[sTRIGGERS][co]
 		if(comparison==null)return
 		trigger=true
 	}
@@ -7081,6 +7100,35 @@ private Long vcmd_saveStateLocally(Map r9,device,List prms,Boolean global=false)
 
 private Long vcmd_saveStateGlobally(Map r9,device,List prms){ return vcmd_saveStateLocally(r9,device,prms,true) }
 
+// attr -> (v -> cmdName) first-wins; attr -> cmdName (v==null) last-wins; v -> cmdName last-wins
+@Field static Map<String,Map<String,String>> physExactFLD=[:]
+@Field static Map<String,String> physFuzzyAttrFLD=[:]
+@Field static Map<String,String> physFuzzyValFLD=[:]
+
+private static void buildPhysLookups(){
+	Map<String,Map<String,String>> byAttrVal=[:]
+	Map<String,String> byAttr=[:]
+	Map<String,String> byVal=[:]
+	for(Map.Entry<String,Map> entry in PhysicalCommands()){
+		String k=(String)entry.key
+		Map cv=(Map)entry.value
+		String a=sMa(cv)
+		String v=(String)cv.v
+		if(a && v==null){
+			byAttr[a]=k
+		} else if(v!=null){
+			if(a){
+				if(!byAttrVal[a]) byAttrVal[a]=[:]
+				if(!((Map)byAttrVal[a]).containsKey(v)) ((Map)byAttrVal[a])[v]=k
+			}
+			byVal[v]=k
+		}
+	}
+	physExactFLD=byAttrVal
+	physFuzzyAttrFLD=byAttr
+	physFuzzyValFLD=byVal
+}
+
 private Long vcmd_loadStateLocally(Map r9,device,List prms,Boolean global=false){
 	List<String> attributes=scast(r9,prms[iZ]).tokenize(sCOMMA)
 	String canister=canisterS(r9,device,prms)
@@ -7152,6 +7200,7 @@ private Long vcmd_loadStateLocally(Map r9,device,List prms,Boolean global=false)
 		del+=l100
 	}
 
+	if(physExactFLD.isEmpty()) buildPhysLookups()
 	def value
 	Integer n; n=iZ
 	String exactCommand,fuzzyCommand,fuzzyCommand1,t0
@@ -7160,20 +7209,11 @@ private Long vcmd_loadStateLocally(Map r9,device,List prms,Boolean global=false)
 		n+=i1
 		exactCommand= fuzzyCommand= fuzzyCommand1=sNL
 		t0="Restoring ${gtLbl(device)} : '$attr' to value '$value'".toString()
-		for(Map.Entry<String,Map>command in PhysicalCommands()){
-			String k= (String)command.key
-			if(sMa(command.value)==attr){
-				if(command.value.v==null) fuzzyCommand=k
-				else
-					if((String)command.value.v==value){
-						t0+=" using command".toString()
-						exactCommand=k
-						break
-					}
-			}
-			if((String)command.value.v==value) // values like open/closed are overloaded to different attributes
-				fuzzyCommand1=k
-		}
+		Map attrExact=(Map)physExactFLD[attr]
+		exactCommand=attrExact!=null ? (String)(attrExact[(String)value] ?: sNL) : sNL
+		if(exactCommand!=sNL) t0+=" using command".toString()
+		fuzzyCommand=(String)(physFuzzyAttrFLD[attr] ?: sNL)
+		fuzzyCommand1=(String)(physFuzzyValFLD[(String)value] ?: sNL)
 		if(exactCommand!=sNL){
 			if(lg)debug "${t0} $exactCommand()",r9
 			executePhysicalCommand(r9,device,exactCommand,null,del,scheduleDevice)
@@ -7653,9 +7693,10 @@ private Boolean evaluateCondition(Map r9,Map cndtn,String collection,Boolean asy
 
 	Boolean not=!!cndtn[sN]
 	String co=sMs(cndtn,sCO)
-	Map comparison; comparison=Comparisons()[sTRIGGERS][co]
+	Map cmps=Comparisons()
+	Map comparison; comparison=cmps[sTRIGGERS][co]
 	Boolean trigger=comparison!=null
-	if(!trigger)comparison=Comparisons()[sCONDITIONS][co]
+	if(!trigger)comparison=cmps[sCONDITIONS][co]
 	Map e=mMs(r9,sEVENT)
 	Map es=mMs(e,sSCH)
 	String rEN=sMs(e,sNM)
@@ -8274,8 +8315,10 @@ private Boolean comp_is_any_of			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=
 	String v=strEvalExpr(r9,mMv(lv))
 	Map r=[:]+mMv(rv)
 	String s=sMv(r)
-	for(String vi in s.tokenize(sCOMMA)){
-		r[sV]=vi.trim()
+	List<String> parts=anyOfCacheFLD[s]
+	if(parts==null){ parts=s.tokenize(sCOMMA).collect{ ((String)it).trim() }; if(anyOfCacheFLD.size()>500) anyOfCacheFLD=[:]; anyOfCacheFLD[s]=parts; anyOfCacheFLD=anyOfCacheFLD }
+	for(String vi in parts){
+		r[sV]=vi
 		if(v==strEvalExpr(r9,r))return true
 	}
 	return false
@@ -8915,12 +8958,13 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 			curCondition=cndtn
 			String co=sMs(cndtn,sCO)
 			if(co){
+				Map cmps=Comparisons()
 				Map comparison
-				comparison=Comparisons()[sCONDITIONS][co]
+				comparison=cmps[sCONDITIONS][co]
 				String cmpTyp; cmpTyp=sCONDITION
 				Boolean isTrig; isTrig=false
 				if(comparison==null){
-					comparison=Comparisons()[sTRIGGERS][co]
+					comparison=cmps[sTRIGGERS][co]
 					if(comparison!=null) isTrig=true
 				}
 				// sSM subscription method, always, never, auto/''
@@ -8994,9 +9038,10 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 		restrictionTraverser={ Map restriction,Map parentRestriction,Map data ->
 			String rco=sMs(restriction,sCO)
 			if(rco){
+				Map cmps=Comparisons()
 				Map comparison
-				comparison=Comparisons()[sCONDITIONS][rco]
-				if(comparison==null) comparison=Comparisons()[sTRIGGERS][rco]
+				comparison=cmps[sCONDITIONS][rco]
+				if(comparison==null) comparison=cmps[sTRIGGERS][rco]
 				if(comparison!=null){
 					Integer pCnt= comparison[sP]!=null ? iMs(comparison,sP):iZ
 					Integer i
@@ -10092,7 +10137,7 @@ private Map setVariable(Map r9,String name,value){
 			getTheLock(semName,lockTyp)
 			def tvariable=globalVarsVFLD[wName][tn]
 			if(tvariable instanceof Map){
-				Map variable=globalVarsVFLD[wName][tn]
+				Map variable=(Map)tvariable
 				variable[sV]=cast(r9,value,sMt(variable))
 				globalVarsVFLD=globalVarsVFLD
 				Map<String,Map> cache=r9[sGVCACHE]!=null ? msMs(r9,sGVCACHE):[:]
@@ -10111,7 +10156,7 @@ private Map setVariable(Map r9,String name,value){
 		Map tvariable=mMs(mMs(r9,sLOCALV),tn)
 //		if(eric())doLog(sDBG,"setVariable tvariable ${tvariable}")
 		if(tvariable){
-			Map variable=mMs(mMs(r9,sLOCALV),tn)
+			Map variable=tvariable
 			String t=sMt(variable)
 //			if(eric())doLog(sDBG,"setVariable found variable ${variable}")
 			if(t.endsWith(sRB)){
@@ -10308,6 +10353,7 @@ private static Map simplifyExpression(Map express){
 @Field static List<String> pn2=[]
 @Field static List<String> pn3=[]
 @Field static List<String> pn4=[]
+@Field static Map<String,Integer> opPriorityFLD=[:]
 
 @Field static List<String> LS=[]
 private static void fill_LS(){
@@ -10340,6 +10386,19 @@ private static void fill_TIM(){
 		pn2=[sMOD1,sMOD,sAMP,sBOR,sBXOR,sBNAND,sBNOR,sBNXOR,sSBL,sSBR] // int fixes
 		pn3=[sLAND,sLOR,sLXOR,sLNAND,sLNOR,sLNXOR,sNEG,sDNEG] // bool fixes
 		pn4=[sEQ,sNEQ,sLTH,sGTH,sLTHE,sGTHE,sNEQA]
+		opPriorityFLD=[(sNEG):i2,(sDNEG):i2,(sBNOT):i2,
+				(sPWR):i3,
+				(sMULP):i4,(sDIV):i4,(sMOD1):i4,(sMOD):i4,
+				(sPLUS):i5,(sMINUS):i5,
+				(sSBL):i6,(sSBR):i6,
+				(sGTH):i7,(sLTH):i7,(sGTHE):i7,(sLTHE):i7,
+				(sEQ):i8,(sNEQ):i8,(sNEQA):i8,
+				(sAMP):i9,(sBNAND):i9,
+				(sBXOR):i10,(sBNXOR):i10,
+				(sBOR):i11,(sBNOR):i11,
+				(sLAND):i12,(sLNAND):i12,
+				(sLXOR):i13,(sLNXOR):i13,
+				(sLOR):14,(sLNOR):14]
 	}
 }
 
@@ -10616,114 +10675,25 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 					items[iZ][sO]=sNL
 					break
 				}
-				//order of operations
+				//order of operations — single pass: find leftmost item with highest-priority operator
+				// tiers 2–14 match original precedence; tier 2 = highest, 14 = lowest
+				// unary minus (null-typed item with sMINUS) is treated as tier 2
+				// stop at itmSz-1: last item has no right operand and must never be selected
 				idx=iZ
-				//#2	!   !!   ~   -	Logical negation, logical double-negation, bitwise NOT, and numeric negation unary operators
+				int ii=iZ; int bestTier=i15
+				int scanLimit=itmSz-i1
 				for(Map item in items){
+					if(ii>=scanLimit) break
 					String t0=sMs(item,sO)
-					if(t0 in tL2 || (sMt(item)==sNL && t0==sMINUS))break
-					idx++
-				}
-				//#3	**	Exponent operator
-				if(idx>=itmSz){
-					//we then look for power **
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in sPWR)break
-						idx++
+					int tier=i15
+					if(t0!=sNL){
+						if(t0==sMINUS && sMt(item)==sNL){ tier=i2 }
+						else{ Integer tp=(Integer)opPriorityFLD[t0]; if(tp!=null) tier=(int)tp }
 					}
+					if(tier<bestTier){ bestTier=tier; idx=ii }
+					if(bestTier==i2) break
+					ii++
 				}
-				//#4	*   /   \   % MOD	Multiplication, division, modulo
-				if(idx>=itmSz){
-					//we then look for * or /
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL4)break
-						idx++
-					}
-				}
-				//#5	+   -	Addition and subtraction
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in lPLSMIN)break
-						idx++
-					}
-				}
-				//#6	<<   >>	Shift left and shift right operators
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL6)break
-						idx++
-					}
-				}
-				//#7	<  <= >  >=	Comparisons: less than, less than or equal to, greater than, greater than or equal to
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL7)break
-						idx++
-					}
-				}
-				//#8	==   !=	Comparisons: equal and not equal
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL8)break
-						idx++
-					}
-				}
-				//#9	&	Bitwise AND
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL9)break
-						idx++
-					}
-				}
-				//#10	^	Bitwise exclusive OR (XOR)
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL10)break
-						idx++
-					}
-				}
-				//#11	|	Bitwise inclusive (normal)OR
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL11)break
-						idx++
-					}
-				}
-				//#12	&&	Logical AND
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL12)break
-						idx++
-					}
-				}
-				//#13	^^	Logical XOR
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL13)break
-						idx++
-					}
-				}
-				//#14	||	Logical OR
-				if(idx>=itmSz){
-					idx=iZ
-					for(Map item in items){
-						if(sMs(item,sO) in tL14)break
-						idx++
-					}
-				}
-				//if none selected get the first one
-				if(idx>=itmSz-i1)idx=iZ
 
 				String o=sMs(items[idx],sO)
 
@@ -12526,10 +12496,8 @@ private Map func_encodeuricomponent(Map r9,List prms){ return func_urlencode(r9,
 
 /** COMMON PUBLISHED METHODS							**/
 
-@CompileStatic
 private String mem(Boolean showBytes=true){
-	String mbytes=new JsonOutput().toJson(gtState())
-	Integer bytes=mbytes.length()
+	Integer bytes=state.toString().length()
 	return Math.round(d100*(bytes/100000.0D))+"%${showBytes ? " ($bytes bytes)".toString():sBLK}"
 }
 
@@ -14181,16 +14149,8 @@ Map fixHeGType(Map r9,Boolean toHubV,String typ,v){
 	return ret
 }
 
-@CompileStatic
-private static String md5(String md5){
-	MessageDigest md=MessageDigest.getInstance(sMD5)
-	byte[] array=md.digest(md5.getBytes())
-	String r; r=sBLK
-	Integer l=array.size()
-	for(Integer i=iZ; i<l;++i){
-		r+=Integer.toHexString((array[i] & 0xFF)| 0x100).substring(i1,i3)
-	}
-	return r
+private static String md5(String s){
+	return MessageDigest.getInstance(sMD5).digest(s.getBytes()).encodeHex().toString()
 }
 
 @Field volatile static Map<String,Map<String,String>> theHashMapVFLD=[:]
@@ -14231,8 +14191,6 @@ private static String hashId2(id,String wName){
 	if(r==sNL){
 		r=sCLN+md5(sCR+tId)+sCLN
 		theHashMapVFLD[wName][tId]=r
-		theHashMapVFLD=theHashMapVFLD
-		mb()
 	}
 	return r
 }

@@ -16,7 +16,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update January 21, 2024 for Hubitat
+ * Last update June 28, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -838,29 +838,15 @@ public Map listAvailableDevices(Boolean raw=false, Integer offset=0){
 		response.devices = [:]
 		if(devices){
 			devices = devices[offset..-1]
+			Integer accSize = iZ
 			response.complete = !devices.indexed().find{ idx, dev ->
-//				log.debug "Loaded device at ${idx} after ${wnow() - time}ms. Data size is ${response.toString().size()}"
-				response.devices[hashId(dev.id)]=getDevDetails(dev, true)
-/*				response.devices[hashId(dev.id)] = [
-					n: dev.getDisplayName(),
-					cn: dev.getCapabilities()*.name,
-					a: dev.getSupportedAttributes().unique{ it.name }.collect{[
-						n: it.name,
-						t: it.getDataType(),
-						o: it.getValues()
-					]},
-					c: dev.getSupportedCommands().unique{ transformCommand(it, overrides) }.collect{[
-						n: transformCommand(it, overrides),
-						p: it.getArguments()
-					]}
-				] */
-				Boolean stop
-				stop = false
-				String jsonData = JsonOutput.toJson(response)
-				Integer responseLength = jsonData.getBytes("UTF-8").length
-				if(responseLength > (50 * 1024)){
-					stop = true // Stop if large
-				}
+				String hid = hashId(dev.id)
+				Map details = getDevDetails(dev, true)
+				String detailsJson = JsonOutput.toJson(details)
+				response.devices[hid] = details
+				accSize += hid.length() + 4 + detailsJson.length()
+				Boolean stop = false
+				if(accSize > 50 * 1024) stop = true
 				if(wnow() - time > 4000) stop = true
 				if(stop && idx < devices.size()-1){
 					response.nextOffset = offset + idx + 1
@@ -976,14 +962,16 @@ String getWUIconName(Integer condition_code, Integer is_day=0)	 {
 	return wuIcon
 }
 
+@Field static volatile Map<String,Integer> conditionFactorRevFLD = [:]
+
 Integer getWUConditionCode(String code){
-	Integer res; res=null
-	for (myMap in conditionFactor){
-		if((String)myMap.value[2] == code) res= myMap.key
+	if(!conditionFactorRevFLD){
+		Map<String,Integer> m=[:]
+		conditionFactor.each{ Integer k, List v -> m[(String)v[2]]=k }
+		conditionFactorRevFLD=m
 	}
-	if(res==null)  res=0
-	//log.info("getWUConditionCode Input: code: " + code + ' result: '+res)
-	return res
+	Integer res=conditionFactorRevFLD[code]
+	return res!=null ? res : 0
 }
 
 @Field final Map<Integer,List>	conditionFactor = [
@@ -1013,17 +1001,33 @@ Integer getWUConditionCode(String code){
 	1279: ['Patchy light snow with thunder', 0.5, 'tstorms'],		1282: ['Moderate or heavy snow with thunder', 0.3, 'tstorms']
 ]
 
-String getWUIconNum(Integer wCode)	 {
-	Map imgItem = imgNames.find{ (Integer)it.code == wCode }
-	String res= imgItem ? (String)imgItem.img : '44'
-	//log.info("getWUIconNum Input: code: " + wCode + ' result: '+res)
-	return res
+@Field static volatile Map<Integer,String> imgNamesCodeMapFLD = [:]
+@Field static volatile Map<Integer,Map> imgNamesMapFLD = [:]
+
+private static void buildImgNamesMaps(List<Map> src){
+	Map<Integer,String> cm=[:]
+	Map<Integer,Map> dm=[:]
+	src.each{ Map it ->
+		Integer c=(Integer)it.code; Integer d=(Integer)it.day
+		if(!cm.containsKey(c)) cm[c]=(String)it.img
+		if(!dm[c]) dm[c]=[:]
+		((Map)dm[c])[d]=it.img
+	}
+	imgNamesCodeMapFLD=cm; imgNamesMapFLD=dm
+}
+
+String getWUIconNum(Integer wCode){
+	if(!imgNamesCodeMapFLD) buildImgNamesMaps(imgNames)
+	String res=(String)imgNamesCodeMapFLD[wCode]
+	return res ?: '44'
 }
 
 private String getImgName(Integer wCode, is_day){
-	String url = "https://cdn.rawgit.com/adey/bangali/master/resources/icons/weather/"
-	Map imgItem = imgNames.find{ (Integer)it.code == wCode && (Integer)it.day == is_day }
-	return (url + (imgItem ? (String)imgItem.img : 'na') + '.png')
+	if(!imgNamesCodeMapFLD) buildImgNamesMaps(imgNames)
+	String url="https://cdn.rawgit.com/adey/bangali/master/resources/icons/weather/"
+	Map dayMap=(Map)imgNamesMapFLD[wCode]
+	String img=dayMap ? (String)dayMap[(Integer)is_day] : null
+	return url+(img ?: 'na')+'.png'
 }
 
 @Field final List<Map> imgNames = [
@@ -1223,19 +1227,23 @@ static String getdsIconCode(String iicon='unknown', String idcs='unknown', Boole
 	return icon
 }
 
+@Field static volatile Map<String,Map> LUTableMapFLD = [:]
+
+private void ensureLUTableMap(){
+	if(!LUTableMapFLD) LUTableMapFLD=LUTable.collectEntries{ [((String)it.ccode): it] }
+}
+
 String getcondText(String wCode){
-	String code = wCode.contains('nt_') ? wCode.substring(3, wCode.size()) : wCode
-	Map LUitem = LUTable.find{ Map it -> (String)it.ccode == code }
-	String res= (LUitem ? (String)LUitem.ctext : sBLK)
-	//log.info("getcondText Input: wCode: " + code + ' result: '+res)
-	return res
+	ensureLUTableMap()
+	String code=wCode.contains('nt_') ? wCode.substring(3, wCode.size()) : wCode
+	Map LUitem=(Map)LUTableMapFLD[code]
+	return LUitem ? (String)LUitem.ctext : sBLK
 }
 
 String getStdIcon(String code){
-	Map LUitem = LUTable.find{ Map it -> (String)it.ccode == code }
-	String res= (LUitem ? (String)LUitem.stdIcon : sBLK)
-	//log.info("getStdIcon Input: code: " + code + ' result: '+res)
-	return res
+	ensureLUTableMap()
+	Map LUitem=(Map)LUTableMapFLD[code]
+	return LUitem ? (String)LUitem.stdIcon : sBLK
 }
 
 @Field final List<Map> LUTable = [
@@ -1322,11 +1330,12 @@ String getStdIcon(String code){
 
 
 
+@Field static volatile Map<Integer,Map> LUTable1MapFLD = [:]
+
 String getCondCode(Integer cid, String iconTOD){
-	Map LUitem = LUTable1.find{ (Integer)it.id == cid }
-	String res= iconTOD==sTRU ? (LUitem ? (String)LUitem.sId : sNPNG) : (LUitem ? (String)LUitem.sIn : sNPNG)
-	//log.info 'getCondCode Inputs: ' + cid.toString() + ', ' + iconTOD + ';  Result: ' + res
-	return res
+	if(!LUTable1MapFLD) LUTable1MapFLD=LUTable1.collectEntries{ [((Integer)it.id): it] }
+	Map LUitem=(Map)LUTable1MapFLD[cid]
+	return iconTOD==sTRU ? (LUitem ? (String)LUitem.sId : sNPNG) : (LUitem ? (String)LUitem.sIn : sNPNG)
 }
 
 @Field static final String sTRU='true'

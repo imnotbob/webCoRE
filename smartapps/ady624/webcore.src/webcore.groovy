@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update June 25, 2026 for Hubitat
+ * Last update June 28, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +32,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - June 25, 2026'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - June 28, 2026'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -918,9 +918,9 @@ def pageDumpPCache(){
 }
 
 def pageDumpGlob(){
+	String wName=sAppId()
 	String n=handlePistn()
-	List t0
-	t0=wgetChildApps().findAll{ (String)it.name==n }
+	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
 	def t1=t0[iZ]
 	Map<String,List> t2= t1!=null ? (Map<String,List>)t1.gtGlobalVarsInUse() : [:]
 	Map<String,Object> newMap
@@ -1085,10 +1085,11 @@ private void clearParentPistonCache(String meth=sNL, Boolean frcResub=false, Boo
 	clearHashMap(wName)
 	acctlocFLD[wName]=null
 	locFLD[wName]=sNL
+	incidentsFLD[wName]=null; incidentsFLD=incidentsFLD
 	clearMeta(wName)
 	mb()
 	String n=handlePistn()
-	List t0; t0=wgetChildApps().findAll{ (String)it.name==n }
+	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
 	if(t0){
 		def t1=t0[iZ]
 		if(t1!=null) t1.clearParentCache(meth) // will cause one child to read gtPdata
@@ -1113,7 +1114,7 @@ void clearChldCaches(Boolean all=false, Boolean clrLogs=false, Boolean uber=fals
 		clearMeta(wName)
 	}
 	Long t1=wnow()
-	List t0; t0=wgetChildApps().findAll{ (String)it.name==n }
+	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
 	if(t0){
 		if(!cldClearFLD[wName]){ cldClearFLD[wName]=(Map)[:]; cldClearFLD=cldClearFLD }
 		if(clrLogs|uber){
@@ -1152,8 +1153,9 @@ void clearChldCaches(Boolean all=false, Boolean clrLogs=false, Boolean uber=fals
 // clear child cache of globals (children refill cache via listAvailableVariables()
 
 private void clearGlobalPistonCache(String meth=null){
+	String wName=sAppId()
 	String n=handlePistn()
-	List t0; t0=wgetChildApps().findAll{ (String)it.name==n }
+	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
 	def t1=t0[iZ]
 	if(t1!=null) t1.clearGlobalCache(meth) // will cause a child to read global Vars
 	t0=null
@@ -1181,6 +1183,7 @@ private void initialize(){
 	}
 
 	String wName=sAppId()
+	loggingFLD[wName]=null; loggingFLD=loggingFLD
 
 	Boolean sprp= gtSetB(pS)
 	if(prpSid==null || prpSid!=sprp){
@@ -1502,24 +1505,31 @@ static void releaseTheLock(String meth=sNL){
 }
 
 @Field volatile static Map<String,List<Map>> childAppsFLD= [:]
+@Field volatile static Map<String,List> childAppsRawFLD= [:]
 @Field static final String sGTCACHED='getCached'
 
 List<Map> gtCachedchildApps(String wName,Boolean haveLock=false){
 	List<Map> res
-	if(!haveLock) Boolean didw=getTheLock(sGTCACHED)
 	res= childAppsFLD[wName]
 	if(!res){
 		String n=handlePistn()
-		res= wgetChildApps().findAll{ (String)it.name==n }.sort{ (String)it.label }.collect{
+		List freshRaw= wgetChildApps().findAll{ (String)it.name==n }.sort{ (String)it.label }
+		List<Map> fresh= freshRaw.collect{
 			String pid=hashPID(it.id)
 			[ (sID): it.id.toString(), pid: pid, (sNM): (String)it.name, label: (String)it.label, nlabel: normalizeLabel(it) ]
 		}
-		childAppsFLD[wName]= res
-		childAppsFLD= childAppsFLD
+		if(!haveLock) Boolean didw=getTheLock(sGTCACHED)
+		res= childAppsFLD[wName]
+		if(!res){
+			res= fresh
+			childAppsFLD[wName]= res
+			childAppsRawFLD[wName]= freshRaw
+			childAppsFLD= childAppsFLD
+			childAppsRawFLD= childAppsRawFLD
+		}
+		if(!haveLock) releaseTheLock(sGTCACHED)
 	}
-	res = []+res
-	if(!haveLock) releaseTheLock(sGTCACHED)
-	return res
+	return []+res
 }
 
 @Field static final String sCLRCACHED='clearCached'
@@ -1527,7 +1537,9 @@ List<Map> gtCachedchildApps(String wName,Boolean haveLock=false){
 void clearCachedchildApps(String wName, Boolean haveLock=false){
 	if(!haveLock) Boolean didw=getTheLock(sCLRCACHED)
 		childAppsFLD[wName]= []
+		childAppsRawFLD[wName]= []
 		childAppsFLD= childAppsFLD
+		childAppsRawFLD= childAppsRawFLD
 	if(!haveLock) releaseTheLock(sCLRCACHED)
 }
 
@@ -1850,8 +1862,8 @@ private Map getDashboardData(){
 	if(storageApp!=null){
 		result=storageApp.getDashboardData()
 	}else{
-		result=((Map<String,Object>)settings).findAll{ ((String)it.key).startsWith("dev:") }.collect{ it.value }.flatten().collectEntries{ dev -> [(hashId(dev.id)): dev]}.collectEntries{ id, dev ->
-			[ (id): ((List<String>)((List)dev.getSupportedAttributes()).collect{ (String)it.name }).unique().collectEntries{
+		result=((Map<String,Object>)settings).findAll{ ((String)it.key).startsWith("dev:") }.values().flatten().collectEntries{ dev ->
+			[ (hashId(dev.id)): ((List<String>)((List)dev.getSupportedAttributes()).collect{ (String)it.name }).unique().collectEntries{
 				def value
 				try { value=dev.currentValue(it) }catch(ignored){ value=null }
 				return [ (it) : value]
@@ -1877,11 +1889,11 @@ private api_intf_dashboard_piston_create(){
 	Map p=(Map)params
 	if(verifySecurityToken(p)){
 		String pname=sMs(p,'name')!=sNL ? sMs(p,'name') : generatePistonName()
-		String n=handlePistn()
-		List apps; apps=wgetChildApps().findAll{ (String)it.name==n }
+		String wName=sAppId()
+		List<Map> apps; apps=gtCachedchildApps(wName)
 		Boolean found; found=false
-		for(mapp in apps){
-			String tN= (String)mapp.label ?: (String)mapp.name
+		for(Map mapp in apps){
+			String tN= sMs(mapp,'label') ?: sMs(mapp,sNM)
 			if(tN==pname){
 				found=true
 				break
@@ -1897,7 +1909,6 @@ private api_intf_dashboard_piston_create(){
 				}
 				debug "Created Piston "+pname
 				result=[(sSTS): sSUCC, (sID): hashPID(piston.id)]
-				String wName=sAppId()
 				clearCachedchildApps(wName)
 			}catch(ignored){
 				error "Please install the webCoRE Piston app"
@@ -1912,16 +1923,32 @@ private api_intf_dashboard_piston_create(){
 }
 
 private findPiston(String id, String nm=sNL, String n=handlePistn()){
-	def piston; piston=null
-	if(id!=sNL || nm!=sNL){
-		List t0; t0=wgetChildApps().findAll{ (String)it.name==n }
+	if(id==sNL && nm==sNL) return null
+	// Fast path: piston apps are in the lightweight cache with precomputed pid/nlabel
+	if(n==handlePistn()){
+		String wName=sAppId()
+		String matchedId=sNL
+		List<Map> cached=gtCachedchildApps(wName)
 		if(id!=sNL){
-			piston=t0.find{ hashPID(it.id)==id }
-			if(!piston)piston=t0.find{ hashId(it.id)==id }
+			for(Map entry in cached){
+				if((String)entry.pid==id || hashId((String)entry[sID])==id){ matchedId=(String)entry[sID]; break }
+			}
 		}
-		if(nm!=sNL && !piston) piston=t0.find{ (String)it.label==nm || normalizeLabel(it)==nm }
-		t0=null
+		if(!matchedId && nm!=sNL){
+			for(Map entry in cached){
+				if((String)entry.label==nm || (String)entry.nlabel==nm){ matchedId=(String)entry[sID]; break }
+			}
+		}
+		if(!matchedId) return null
+		return wgetChildApps().find{ it.id.toString()==matchedId }
 	}
+	// Non-piston child apps (e.g. fuel stream): original scan
+	List t0=wgetChildApps().findAll{ (String)it.name==n }
+	def piston=null
+	if(id!=sNL){
+		piston=t0.find{ hashPID(it.id)==id || hashId(it.id)==id }
+	}
+	if(nm!=sNL && !piston) piston=t0.find{ (String)it.label==nm || normalizeLabel(it)==nm }
 	return piston
 }
 
@@ -2203,20 +2230,20 @@ private api_intf_dashboard_piston_set_end(){
 		LinkedHashMap<String,Object> chunks=pPistonChunksFLD[ckey]
 		if(chunks && (Integer)chunks.count){
 			Boolean ok; ok=true
-			String data; data=sBLK
+			StringBuilder sb=new StringBuilder()
 			Integer i; i=iZ
 			Integer count=(Integer)chunks.count
 			while(i<count){
 				String s=chunks["chunk:$i".toString()]
 				if(s){
-					data += s
+					sb.append(s)
 				}else{
-					data=sBLK
 					ok=false
 					break
 				}
 				i++
 			}
+			String data=ok ? sb.toString() : sBLK
 			state.remove("chunks")
 			pPistonChunksFLD[ckey]=null
 			mb()
@@ -2602,8 +2629,9 @@ def findCreateFuel(Map req){
 
 	}else{
 		String streamName="${(req[sC] ?: sBLK)}||${req[sN]}"
+		List allFuel=wgetChildApps().findAll{ (String)it.name==n }
 		List l
-		l=wgetChildApps().findAll{ (String)it.name== n && ((String)it.label)?.contains(streamName)}
+		l=allFuel.findAll{ ((String)it.label)?.contains(streamName) }
 		for (sa in l){
 			String sl=(String)sa.label
 			Integer ndx=sl.indexOf(' - ' )
@@ -2618,9 +2646,10 @@ def findCreateFuel(Map req){
 		l=null
 
 		if(!result){
-			Integer t0= wgetChildApps().findAll{
-				(String)it.name==n && ((String)it.label)?.contains(' - ') && ((String)it.label)?.contains('||') }.collect{
+			Integer t0=allFuel.findAll{
+				((String)it.label)?.contains(' - ') && ((String)it.label)?.contains('||') }.collect{
 					((String)it.label).split(' - ')[0].toInteger() }.max()
+			allFuel=null
 			Integer id=(t0 ?: iZ) + i1
 			try{
 				result=addChildApp('ady624', n, "$id - $streamName")
@@ -3143,14 +3172,13 @@ private void cleanUp(){
 		for(String foo in data)state.remove(foo)
 		app.removeSetting('hubitatQueryString')
 
-		String n=handlePistn()
+		String wName=sAppId()
 		String pid
-		List t0
-		t0=wgetChildApps().findAll{ (String)it.name==n }
-		for(it in t0){
-			pid=hashId(it.id)
+		List<Map> t0=gtCachedchildApps(wName)
+		for(Map it in t0){
+			pid=hashId((String)it[sID])
 			state.remove(pid)
-			pid=hashPID(it.id)
+			pid=sMs(it,'pid')
 			state.remove(pid)
 		}
 		t0=null
@@ -3606,26 +3634,33 @@ List getPushDev(){
 }
 
 @Field static final String sSECTOKENS='securityTokens'
+@Field static volatile LinkedHashMap<String,Long> securityTokensFLD=null
 
 private void initTokens(){
 	debug "Dashboard: Initializing security tokens"
+	securityTokensFLD=new LinkedHashMap<String,Long>()
 	assignAS(sSECTOKENS,[:])
 }
 
 @CompileStatic
 private Boolean verifySecurityToken(Map params){
 	String tokenId=sMs(params,'token')
-	//trace "verifySecurityToken ${tokenId}"
-	LinkedHashMap<String,Long> tokens=(LinkedHashMap<String,Long>)gtSt(sSECTOKENS)
-	if(!tokens || !tokenId) return false
+	if(!tokenId) return false
+	LinkedHashMap<String,Long> tokens=securityTokensFLD
+	if(tokens==null){
+		tokens=(LinkedHashMap<String,Long>)gtSt(sSECTOKENS)
+		if(!tokens) return false
+		securityTokensFLD=tokens
+	}
 	Long threshold=wnow()
-	Boolean modified; modified=false
+	Boolean modified=false
 	//remove all expired tokens
-	for (token in tokens.findAll{ (Long)it.value < threshold }){
+	for(token in tokens.findAll{ (Long)it.value < threshold }){
 		tokens.remove((String)token.key)
 		modified=true
 	}
 	if(modified){
+		securityTokensFLD=tokens
 		assignAS(sSECTOKENS,tokens)
 	}
 	Long token=tokens[tokenId]
@@ -3639,8 +3674,11 @@ private Boolean verifySecurityToken(Map params){
 private String createSecurityToken(){
 	trace "Dashboard: Generating new security token after a successful PIN authentication"
 	String token=UUID.randomUUID().toString()
-	Map a= (Map)gtAS(sSECTOKENS)
-	LinkedHashMap<String,Long> tokens= (a ?: [:]) as LinkedHashMap<String,Long>
+	LinkedHashMap<String,Long> tokens=securityTokensFLD
+	if(tokens==null){
+		Map a=(Map)gtAS(sSECTOKENS)
+		tokens=(a ?: [:]) as LinkedHashMap<String,Long>
+	}
 	Long mexpiry; mexpiry=0L
 	String eo=gtSetStr('expiry').toLowerCase().replace("every ", sBLK).replace("(recommended)", sBLK).replace("(not recommended)", sBLK).trim()
 	switch(eo){
@@ -3652,6 +3690,7 @@ private String createSecurityToken(){
 		case "never": mexpiry=3110400000L; break //never means 100 years, okay?
 	}
 	tokens[token]=Math.round(wnow() + (mexpiry * 1000.0D))
+	securityTokensFLD=tokens
 	assignAS(sSECTOKENS,tokens)
 	return token
 }
@@ -3852,24 +3891,12 @@ Boolean isInstalled(){
 
 String generatePistonName(){
 	List apps=wgetChildApps()
-	Integer i; i=i1
-	String bname= handlePistn()+' #'
-	while (true){
-		String name=bname + i.toString()
-		Boolean found; found=false
-		for (mapp in apps){
-			String tN= (String)mapp.label ?: (String)mapp.name
-			if(tN==name){
-				found=true
-				break
-			}
-		}
-		if(found){
-			i++
-			continue
-		}
-		return name
-	}
+	Set<String> used=new HashSet<String>()
+	for(mapp in apps){ used << ((String)mapp.label ?: (String)mapp.name) }
+	Integer i=i1
+	String bname=handlePistn()+' #'
+	while(used.contains(bname+i.toString())) i++
+	return bname+i.toString()
 }
 
 void refreshDevices(){
@@ -4449,8 +4476,12 @@ def hsmAlertHandler(evt){ // hsmAlert event
 // this should search the db from hsmAlert events? - they are not there
 
 @Field static final String sGTINCIDENTS='getIncidents'
+@Field static volatile Map<String,List<Map>> incidentsFLD=[:]
 
 private List<Map> getIncidents(Boolean haveLock=false){
+	String wName=sAppId()
+	List<Map> cached=incidentsFLD[wName]
+	if(cached!=null) return cached
 
 	if(!haveLock) Boolean didw=getTheLock(sGTINCIDENTS)
 
@@ -4459,6 +4490,7 @@ private List<Map> getIncidents(Boolean haveLock=false){
 	alerts= a? (List<Map>)a : []
 	Integer osz; osz=alerts.size()
 	if(osz==iZ){
+		incidentsFLD[wName]=[]; incidentsFLD=incidentsFLD
 		if(!haveLock) releaseTheLock(sGTINCIDENTS)
 		return []
 	}
@@ -4477,7 +4509,7 @@ private List<Map> getIncidents(Boolean haveLock=false){
 	String nevDesc= normalizeString(evDesc)
 */
 	Long incidentThreshold=Math.round(wnow() - 604800000.0D) // 1 week
-	newAlerts=alerts.collect{ it }.findAll{
+	newAlerts=alerts.findAll{
 		(Long)it[sDATE] >= incidentThreshold }.sort{ (Long)it[sDATE] }
 
 	new2Alerts=[]
@@ -4525,18 +4557,21 @@ private List<Map> getIncidents(Boolean haveLock=false){
 	for(l in rules.keySet()){
 		new3Alerts += rules[l]
 	}
-	new4Alerts = new3Alerts.collect { it }.sort { (Long)it[sDATE] }
+	new4Alerts = new3Alerts.sort { (Long)it[sDATE] }
 
 	Integer nsz=new4Alerts.size()
 	if(osz!=nsz || chgd){
 		assignAS(sHSMALRTS,[]+new4Alerts)
+		incidentsFLD[wName]=null; incidentsFLD=incidentsFLD
 
 		if(!haveLock) releaseTheLock(sGTINCIDENTS)
 
 		clearParentPistonCache("hsmAlerts changed")
 		clearBaseResult('hsmAlertHandler')
-	}else
+	}else{
+		incidentsFLD[wName]=new4Alerts; incidentsFLD=incidentsFLD
 		if(!haveLock) releaseTheLock(sGTINCIDENTS)
+	}
 	return new4Alerts
 }
 
@@ -4606,15 +4641,23 @@ def lifxHandler(response, Map cbkData){
 /*** DEBUG FUNCTIONS														***/
 /******************************************************************************/
 
+@Field static volatile Map<String,Map<String,Boolean>> loggingFLD=[:]
+
 private Map<String,Boolean> getLogging(){
+	String wName=sAppId()
+	Map<String,Boolean> res=(Map<String,Boolean>)loggingFLD[wName]
+	if(res) return res
 	String lgging=gtSetStr('logging') ?: sNL
-	return [
+	res=[
 		(sERR): true,
 		(sWARN): true,
 		(sINFO): (lgging!=sNONE && lgging!=sNL),
 		(sTRC): (lgging==sMEDIUM) || (lgging==sFULL),
 		(sDBG): (lgging==sFULL)
 	]
+	loggingFLD[wName]=res
+	loggingFLD=loggingFLD
+	return res
 }
 
 private Map log(message, Integer shift=iN2, err=null, String cmd=sNL){
@@ -6118,15 +6161,8 @@ private static String generateMD5_A(String s){
 }
 
 @CompileStatic
-private static String md5(String md5){
-	MessageDigest md= MessageDigest.getInstance(sMD5)
-	byte[] array=md.digest(md5.getBytes())
-	String result; result=sBLK
-	Integer l=array.size()
-	for(Integer i=iZ; i<l; ++i){
-		result += Integer.toHexString((array[i] & 0xFF)| 0x100).substring(i1,i3)
-	}
-	return result
+private static String md5(String s){
+	return MessageDigest.getInstance(sMD5).digest(s.getBytes()).encodeHex().toString()
 }
 
 @CompileStatic
@@ -6157,7 +6193,6 @@ private String hashId(id){
 		result=sCLN+md5(sCR + myId)+sCLN
 		theHashMapVFLD[wName][myId]=result
 		theHashMapVFLD=theHashMapVFLD
-		mb()
 	}
 	return result
 }
@@ -6325,13 +6360,12 @@ def pageDumpDevices(){
 def pageDumpExecution(){
 	String wName=sAppId()
 	if(p_executionFLD[wName]==null){ p_executionFLD[wName]=(Map)[:]; p_executionFLD=p_executionFLD }
-	String n=handlePistn()
 	String t='tot'
 	String c='cnt'
-	List<Map> b= wgetChildApps().findAll{ (String)it.name==n }.sort{ (String)it.label }.collect{
-		String pid=hashPID(it.id)
+	List<Map> b= gtCachedchildApps(wName).collect{ Map it ->
+		String pid=sMs(it,'pid')
 		Map a= p_executionFLD[wName][pid] ?: [:]
-		[ (sID): pid, (sNM): normalizeLabel(it), (c): a[c], (t): a[t]  ]
+		[ (sID): pid, (sNM): sMs(it,'nlabel'), (c): a[c], (t): a[t]  ]
 	}
 	LinkedHashMap<String,Map> a; a=[:]
 	b.sort{ Map bb -> (bb[c]!= null ? -(Long)bb[c] : bb[c]) }.each { Map it ->
