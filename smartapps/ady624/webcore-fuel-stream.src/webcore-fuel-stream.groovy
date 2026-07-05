@@ -19,7 +19,7 @@
  *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
  *  for the specific language governing permissions and limitations under the License.
  *
- *  Last update June 28, 2026 for Hubitat
+ *  Last update July 5, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -214,6 +214,7 @@ def uninstalled(){
 	if(foo){
 		(void)parent.resetFuelStreamList()
 		fuelFLD=null
+		decodedStreamFLD=[:]
 		readTmpFLD= [:]
 		readTmpBFLD= [:]
 		writeTmpFLD= [:]
@@ -258,6 +259,7 @@ def updated(){
 		readTmpBFLD= [:]
 		writeTmpFLD= [:]
 		fuelFLD=null // clear list of fuel streams cache
+		decodedStreamFLD=[:]
 	}
 
 	if(gtSetStr('app_name')) app.updateLabel(gtSetStr('app_name'))
@@ -689,21 +691,22 @@ static String encodeStreamN(Map stream){
  */
 @CompileStatic
 static Map decodeStreamN(String stream){
+	Map cached=decodedStreamFLD[stream]
+	if(cached!=null) return cached
 	// parse out i, c, n
-	//String streamName="${(stream.c ?: sBLK)}||${stream.n}"
 	String[] tname=stream.split(sFuelDelim) //id+'-'+streamName
-	Integer i=tname[iZ].toInteger() //"${stream.i}"
+	Integer i=tname[iZ].toInteger()
 	String[] tname1=tname[i1].split("\\|\\|") //streamName
 	String c=tname1[iZ]
 	String n=tname1[i1]
-
-//	if(isEric())myDetail null,"decodeStreamN stream: $stream tname: $tname id: $i tname1: $tname1",iN2
-
-	return [(sI):i, (sC):c, (sN):n]
+	Map result=[(sI):i, (sC):c, (sN):n]
+	decodedStreamFLD[stream]=result
+	return result
 }
 
 // cache of fuelstreams
 @Field static List<Map>fuelFLD
+@Field static Map<String,Map> decodedStreamFLD=[:]
 
 List<Map> gtFuelList(){
 	fuelFLD= !fuelFLD ? (List)parent.listFuelStreams(false) : fuelFLD
@@ -1672,6 +1675,7 @@ def put_settings(Boolean needOauth=true){
 /**
  * get data source entry for sid/attribute pair
  */
+@CompileStatic
 Map findDataSourceEntry(String sid, String attribute){
 	Map ent
 	ent= null
@@ -1689,6 +1693,7 @@ Map findDataSourceEntry(String sid, String attribute){
  * get Last data item from a data source entry as internal map
  * @return [date: (Date)date, (sVAL): v, t: (Long)t]
  */
+@CompileStatic
 Map gtLastData(Map ent, Boolean multiple=true){
 	Map lst; lst=null
 	List<Map> fdata= gtDataSourceData(ent,multiple)
@@ -1768,6 +1773,7 @@ private Double getValue(String id, String attr, val){
 	return ret
 }
 
+@CompileStatic
 static Double extractNumber(String input){
 	List<Double>val=input.findAll( /-?\d+\.\d*|-?\d*\.\d+|-?\d+/ )*.toDouble()
 	val[iZ]
@@ -1778,6 +1784,7 @@ static Double extractNumber(String input){
  * Shared - used by graphs to returns data later than time
  * @return internal format [[date: (Date)date, (sVAL): v, t: (Long)t]...]
  */
+@CompileStatic
 List<Map> CgetData(Map ent, Date time, Boolean multiple=true){
 
 	List<Map> return_data
@@ -1788,7 +1795,7 @@ List<Map> CgetData(Map ent, Date time, Boolean multiple=true){
 	List<Map> data2
 	data2=return_data.findAll{ Map it -> lMt(it) > end }
 
-	if(!data2) data2= return_data ? [return_data[-i1]] : data2
+	if(!data2) data2= return_data ? [(Map)return_data.last()] : data2
 
 	if(isEric())myDetail null,"CgetData: $ent $time ${data2.size()}",iN2
 	return data2
@@ -2427,6 +2434,7 @@ Map gtSensorFmt(Boolean curStates=false,Boolean multiple=true){
 	return sensors_fmt
 }
 
+@CompileStatic
 static String sLblTyp(String typ){
 	if(typ=='fuel') return sBLK
 	else return 'Sensor '
@@ -4702,6 +4710,7 @@ Map getOptions_timegraph(){
 	return options
 }
 
+@CompileStatic
 static String getDrawType_timegraph(){
 	return "google.visualization.LineChart"
 }
@@ -5498,11 +5507,13 @@ def attributeHeatmap(){
 	attributeShare1(true)
 }
 
+@CompileStatic
 static String dd(Double num){
 	if(num<d10) return s0+num.toInteger().toString()
 	else return num.toInteger().toString()
 }
 
+@CompileStatic
 static String convertToString(Long msec_){
 	Long msec=msec_
 	if(msec == 0L) return "00:00:00"
@@ -11454,13 +11465,20 @@ void checkSched(){
 
 // TODO quant functions
 
+@CompileStatic
+private static Float toFloat(Object v){
+	if(v instanceof Float) return (Float)v
+	if(v instanceof Number) return ((Number)v).toFloat()
+	return Float.valueOf(v.toString())
+}
+
 /** returns internal format entry */
 @CompileStatic
 Map sum(List<Map> events, Integer decimals, Boolean round, Integer granularity){
 	Float sum
 	sum=new Float(0)
 	for(Map event in events){
-		sum += Float.valueOf(event[sVAL].toString())
+		sum += toFloat(event[sVAL])
 	}
 
 	Map tdate=[(sDT): events[events.size()-i1][sDT], boundary: round, granularity: granularity]
@@ -11475,7 +11493,7 @@ Map average(List<Map>events, Integer decimals, Boolean round, Integer granularit
 	sum=new Float(0)
 	Integer sz=events.size()
 	for(Map event in events){
-		sum += Float.valueOf(event[sVAL].toString())
+		sum += toFloat(event[sVAL])
 	}
 	sum /= sz
 
@@ -11488,9 +11506,9 @@ Map average(List<Map>events, Integer decimals, Boolean round, Integer granularit
 @CompileStatic
 Map min(List<Map>events, Integer decimals, Boolean round, Integer granularity){
 	Float min
-	min=Float.valueOf(events[iZ][sVAL].toString())
+	min=toFloat(events[iZ][sVAL])
 	for(Map event in events){
-		Float v=Float.valueOf(event[sVAL].toString())
+		Float v=toFloat(event[sVAL])
 		min=v < min ? v : min
 	}
 
@@ -11503,9 +11521,9 @@ Map min(List<Map>events, Integer decimals, Boolean round, Integer granularity){
 @CompileStatic
 Map max(List<Map>events, Integer decimals, Boolean round, Integer granularity){
 	Float max
-	max=Float.valueOf(events[iZ][sVAL].toString())
+	max=toFloat(events[iZ][sVAL])
 	for(Map event in events){
-		Float v=Float.valueOf(event[sVAL].toString())
+		Float v=toFloat(event[sVAL])
 		max=v > max ? v : max
 	}
 
@@ -11843,55 +11861,58 @@ Boolean lowReadFile(String fname,String ts1){
  * @return Map  [ size: x, data: List<Map> [[date: date, (sVAL): v, t: t], ....] ]
  */
 Map readFile(sensor, String attribute, String fname=sNL){
-
-	String s= "readFile $sensor $attribute $fname"
-	if(isEric())myDetail null,s,i1
-
 	String filename_=fname ?: getFileName(sensor, attribute)
+	String sensorLabel= isEric() ? gtLbl(sensor).toString() : sBLK
+	return readFileByName(filename_, attribute, sensorLabel)
+}
+
+@CompileStatic
+Map readFileByName(String filename_, String attribute, String sensorLabel=sBLK){
+
+	String s= isEric() ? "readFile ${sensorLabel} ${attribute} ${filename_}" : sBLK
+	if(s)myDetail null,s,i1
+
 	String pNm=filename_
 
 	if(readTmpFLD[pNm]==sNL){ readTmpFLD[pNm]=sBLK; readTmpFLD= readTmpFLD }
 	try{
 		Integer sz=readTmpFLD[pNm].size()
-		//myDetail null,"pNm: ${pNm} cache sz: $sz",iN2
 		if(sz> 4){
 			JsonSlurper jsonSlurper=new JsonSlurper()
 			List<Map> parse=convertToInternal((List<Map>)jsonSlurper.parseText(readTmpFLD[pNm]))
-			if(isEric())trace "readFile cache hit",null
-			if(isEric())myDetail null,s
+			if(s){ trace "readFile cache hit",null; myDetail null,s }
 			return ['size': sz, 'data': parse ]
 		}
 	} catch(ignored){}
 
-	String sensor_name=gtLbl(sensor)
-	String ts1= " for ${sensor_name} (${attribute}) ($filename_}"
+	String ts1= " for ${sensorLabel} (${attribute}) ($filename_}"
 	Boolean ok= lowReadFile(filename_,ts1)
 	if(ok){
 		Integer sz
 		sz = readTmpFLD[pNm].size()
-		//myDetail null,"after read pNm: ${pNm} cache sz: $sz",iN2
 		if (sz) {
 			String sc
 			sc = readTmpFLD[pNm]
-			while (sz && sc[sz - i1] != ']') {
-				sc = sc.substring(iZ, sz - i1)
+			Integer lastBracket = sc.lastIndexOf(']')
+			if(lastBracket < iZ){ sz = iZ }
+			else{
+				if(lastBracket < sz - i1) sc = sc.substring(iZ, lastBracket + i1)
 				sz = sc.size()
+				readTmpFLD[pNm] = sc
 			}
-			readTmpFLD[pNm] = sc
 		}
-		//myDetail null,"after TRIM pNm: ${pNm} cache sz: $sz",iN2
 		List<Map> parse
 		parse = []
 		if (sz > i1) {
 			JsonSlurper jsonSlurper = new JsonSlurper()
 			parse = convertToInternal((List<Map>) jsonSlurper.parseText(readTmpFLD[pNm]))
 		} else sz = iZ
-		if (isEric()) myDetail null, s + " $sz"
+		if (s) myDetail null, s + " $sz"
 		return ['size': sz, 'data': parse]
 	}
 	readTmpFLD[pNm]=sNL
 	readTmpFLD= readTmpFLD
-	if(isEric())myDetail null,s
+	if(s)myDetail null,s
 	return ['size': iZ, 'data': [] ]
 }
 
@@ -11906,6 +11927,7 @@ String getFileName(sensor, String attribute){
 }
 
 /** receives internal format */
+@CompileStatic
 List<Map> pruneData(List<Map> input_data, Integer days){
 
 	Boolean isE= isEric()
@@ -12175,7 +12197,6 @@ static List<Map> rtnFileData(List<Map> events){
 	for(Map data in events){
 		v= data.containsKey(sV) ? data[sV] : data[sVAL]
 		v= data.containsKey(sD) ? data[sD] : v
-		t= data.containsKey(sI) ? lMs(data,sI) : 0L
 		t= data.containsKey(sT) ? lMt(data) : dtMdt(data).getTime()
 		if(data.containsKey(sQ))
 			file_data << [(sV): v, (sT): t, (sQ):data[sQ]]
@@ -12189,11 +12210,16 @@ static List<Map> rtnFileData(List<Map> events){
 
 /** shared (LTS & fuel) only method - save different formats to file format */
 Boolean writeFile(sensor, String attribute, List<Map> events, String fname=sNL){
-
-	String s= "writeFile $sensor $attribute $fname"
-	if(isEric())myDetail null,s,i1
-
 	String filename_=fname ?: getFileName(sensor, attribute)
+	String sensorLabel= isEric() ? gtLbl(sensor).toString() : sBLK
+	return writeFileByName(filename_, attribute, events, sensorLabel)
+}
+
+Boolean writeFileByName(String filename_, String attribute, List<Map> events, String sensorLabel=sBLK){
+
+	String s= sensorLabel ? "writeFile ${sensorLabel} ${attribute} ${filename_}" : sBLK
+	if(s)myDetail null,s,i1
+
 	String pNm=filename_
 
 	List<Map> file_data
@@ -12218,8 +12244,7 @@ Boolean writeFile(sensor, String attribute, List<Map> events, String fname=sNL){
 		} */
 		if(sz> 4 && sz==writeTmpFLD[pNm].size() && writeTmpFLD[pNm]==readTmpFLD[pNm]){
 			writeTmpFLD[pNm]=sBLK; writeTmpFLD= writeTmpFLD
-			if(isEric()) trace "writeFile no changes",null
-			if(isEric())myDetail null,s+" TRUE"
+			if(s){ trace "writeFile no changes",null; myDetail null,s+" TRUE" }
 			return true
 		}
 
@@ -12272,18 +12297,17 @@ Content-Disposition: form-data; name="folder"
 			readTmpFLD= readTmpFLD
 			writeTmpFLD[pNm]=sBLK; writeTmpFLD= writeTmpFLD
 			if(res){
-				if(isEric())myDetail null,s+" TRUE"
+				if(s)myDetail null,s+" TRUE"
 				return true
 			}
 		}catch(e){
-			String sensor_name=gtLbl(sensor)
-			error "Write File ${sensor_name} (${attribute}) ($filename_} :: Exception: ",null,iN2,e
+			error "Write File ${sensorLabel} (${attribute}) ($filename_} :: Exception: ",null,iN2,e
 		}
 		readTmpBFLD[pNm]=null
 		readTmpFLD[pNm]=sNL; readTmpFLD= readTmpFLD
 		writeTmpFLD[pNm]=sBLK; writeTmpFLD= writeTmpFLD
 	}
-	if(isEric())myDetail null,s+" FALSE"
+	if(s)myDetail null,s+" FALSE"
 	return false
 }
 
@@ -12498,6 +12522,7 @@ def mainFuelstream(){
  */
 public void createStream(settings){
 	fuelFLD=null
+	decodedStreamFLD=[:]
 	// fuelstream does not have graphType set
 	state.fuelStream=[(sI): settings.id, (sC): (settings.canister ?: sBLK), (sN): settings.name, w: i1, (sT): getFormattedDate(new Date())]
 }
@@ -12733,7 +12758,6 @@ List<Map> cleanFuelStream(List<Map> istream){
 	Double storageSize= tstream.toString().size() / 1024.0D
 	Integer max=(gtSetting('maxSize') ?: 95) as Integer
 
-	Boolean a
 	if(storageSize.toInteger() > max){
 		Integer points=stream.size()
 		Double averageSize=points > 0 ? (storageSize/points).toDouble() : 0.0D
@@ -12743,8 +12767,8 @@ List<Map> cleanFuelStream(List<Map> istream){
 		pointsToRemove=pointsToRemove > 0 ? pointsToRemove : 0
 
 		msg +="size trim to $max: Size ${storageSize}KB Points ${points} Avg $averageSize Remove $pointsToRemove ".toString()
-		List<Map> toBeRemoved=stream.sort{ Map it -> it.t }.take(pointsToRemove)
-		a=stream.removeAll(toBeRemoved)
+		stream.sort{ Map it -> (Long)it.t }
+		stream=stream.drop(pointsToRemove)
 	}
 
 	nsz=stream.size()
@@ -12832,8 +12856,8 @@ static String getFormattedDate(Date date=new Date()){
 
 @CompileStatic
 static String cleanHtml(String htm){
-	return htm.replace('\t', sBLK).replace('\n', sBLK).replace('  ', sBLK).replaceAll('> ','>').replaceAll(' >','>')
-	//return htm.replace('\t', sSPC).replace('\n', sSPC).replace('    ', sSPC).replace('   ', sSPC).replace('  ',sSPC).replaceAll('> ','>').replaceAll(' >','>')
+	// 5 passes → 3: merge tab+newline removal, keep double-space pass, merge > space passes
+	return htm.replaceAll(/[\t\n]/,sBLK).replace('  ', sBLK).replaceAll(/> | >/,'>')
 }
 
 // Material-Design-lite

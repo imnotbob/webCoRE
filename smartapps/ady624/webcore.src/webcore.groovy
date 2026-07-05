@@ -18,7 +18,156 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update June 28, 2026 for Hubitat
+ * Last update July 5, 2026 for Hubitat
+ */
+
+/*
+ * Parent (this file) <-> piston child (webcore-piston.groovy) interface.
+ * Piston children are found via findPiston()/getChildApps() and referenced below as
+ * piston/chld/t1; the child calls parent.xxx() using the wNNN() wrapper methods defined
+ * near the bottom of webcore-piston.groovy.
+ *
+ * Calls this app makes to a piston child:
+ *   piston.get(minimal)                       - fetch full/minimal runtime data for the dashboard
+ *   piston.setup(data, chunks)                - save an uploaded/edited piston definition
+ *   piston.pausePiston() / piston.resume()    - pause/resume a piston
+ *   piston.deletePiston()                     - piston self-cleanup before app.deleteChildApp()
+ *   piston.setLocalVariable(name, value)      - set a piston-local variable from the dashboard
+ *   piston.proxyEvaluateExpression(...)       - evaluate an expression in the piston's context (IDE)
+ *   piston.activity(lastLogTimestamp)         - get activity/log data since a timestamp
+ *   piston.execute(data, src)                 - run a piston (external trigger or executePiston())
+ *   piston.config(data)                       - initialize a newly created piston
+ *   piston.test()/.clickTile()/.setBin()/.setCategory()/.updModified()/.setLoggingLevel()/.clearLogs()
+ *                                              - misc dashboard-driven ops (dynamic dispatch via common_Simple)
+ *   chld.clearLogsQ()/.clearAllQ()/.clearCache() - periodic/bulk piston cache cleanup (clearChldCaches)
+ *   chld.curPState()                          - fetch cached piston metadata (gtMeta fallback)
+ *   chld.killSwitchDisable()                  - notify all pistons the global kill switch turned on
+ *   chld.updated()                            - force a child's updated() (forced resubscribe)
+ *   t1.clearParentCache(meth)                 - tell one piston to refresh its cached copy of gtPdata()
+ *   t1.clearGlobalCache(meth)                 - tell one piston to refresh its global variable cache
+ *   t1.gtGlobalVarsInUse()                    - ask a piston which global vars it references
+ *
+ * Calls a piston child makes to this app (parent.xxx()):
+ *   parent.isInstalled() / .getWikiUrl() / .getDashboardUrl() / .getWCendpoints()
+ *                                              - install state, links, and endpoint config (piston prefs page)
+ *   parent.generatePistonName()               - default name for a new piston
+ *   parent.pistonUninstalled(id)              - piston deleted outside the dashboard API (e.g. HE Apps list);
+ *                                                invalidates the parent's piston-list/metadata/base-result caches
+ *   parent.readFuelStream()/.writeFuelStream()/.clearFuelStream()/.writeToFuelStream()
+ *                                              - fuel stream storage passthrough
+ *   parent.getChildAttributes()/.getChildComparisons()/.getChildVirtCommands()/.getChildVirtDevices()/
+ *   .getChildCommands()/.getColors()          - shared reference-data caches, loaded once and reused by all pistons
+ *   parent.gtPdata()                          - shared piston state map (enabled/disabled, settings, lifx, etc.)
+ *   parent.pCallupdateRunTimeData(rt)         - relay updated runtime data back into the parent's cache
+ *   parent.getPushDev()                       - configured push-notification device(s)
+ *   parent.executePiston(pistonId, data, selfId) - ask parent to execute a different piston
+ *   parent.pausePiston(pistonId, selfId) / .resumePiston(pistonId, selfId) - ask parent to pause/resume another piston
+ *   parent.isPisPaused(pistonId)              - ask parent whether another piston is paused
+ *   parent.getGStore()                        - global store map
+ *   parent.listAvailableDevices(raw)          - devices selected for use with webCoRE
+ *   parent.getWData()                         - weather data
+ *   parent.listAvailableVariables()           - global variables list
+ *
+ * Parent (this file) <-> fuel stream child (webcore-fuel-stream.groovy) interface.
+ * Fuel stream/graph children are found via findCreateFuel()/getChildApps(name==handleFuelS()),
+ * referenced below as result/stream/it/lts (lts is the fixed "webCoRE Long Term Storage" instance
+ * returned by gtLTS() - same app type, distinguished by label).
+ *
+ * Calls this app makes to a fuel stream child:
+ *   result.createStream(map)                  - initialize a newly created fuel stream
+ *   result.readFuelStream(req)/.writeFuelStream(req)/.clearFuelStream(req)/.updateFuelStream(req)
+ *                                              - proxied 1:1 from the parent methods of (almost) the same
+ *                                                name that pistons call - see readFuelStream() etc. below
+ *   it.getFuelStreams(includeLTS)             - list a canister's streams (listFuelStreams)
+ *   stream.listFuelStreamData(id)             - fetch stored data points (api_intf_fuelstreams_get)
+ *   graphChild.gforward(data.path)            - forward an HTTP request to a graph (api_forward); found via
+ *                                                findPiston() with n=handleFuelS(), so despite the helper's
+ *                                                name this is a fuel stream child, not a piston
+ *   lts.quantParams(sensorId, attr)/.isStorage(sensorId, attr)/.isQuant(sensorId, attr)
+ *                                              - proxied from quantParams()/ltsAvailable()/ltsQuant() below,
+ *                                                which regular graph children call on the parent to reach LTS
+ *
+ * Calls a fuel stream child makes to this app (parent.xxx()):
+ *   parent.childAppDuplicationFinished(type, childId) - notify parent a graph was duplicated
+ *   parent.resetFuelStreamList()              - invalidate the cached fuel stream list
+ *   parent.ltsExists() / .ltsAvailable(id, attr) / .quantParams(id, attr)
+ *                                              - ask parent to check/query the LTS child (see proxy above)
+ *   parent.listFuelStreams(includeLTS)        - list all fuel streams across canisters
+ *   parent.readFuelStream(stream)             - read another stream's data (cross-stream reference)
+ *   parent.getWData() / .openWeatherConfig()  - weather data / config (proxied to the storage child, see below)
+ *   parent.getWCendpoints()                   - endpoint config
+ *   parent.hashPID(id)                        - hash an id the same way pistons are hashed
+ *
+ * Parent (this file) <-> storage child (webcore-storage.groovy) interface.
+ * There is at most one storage child per instance, found/created via getStorageApp(); it exists only
+ * to host the $weather device integration.
+ *
+ * Calls this app makes to the storage child:
+ *   storageApp.updateLabel(label)             - keep the storage app's label in sync with this app's name
+ *   storageApp.settingsToState(key, value)    - push weather-related settings into the storage app's state
+ *   storageApp.startWeather() / .stopWeather() - enable/disable the weather integration
+ *   storageApp.getDashboardData()             - weather data for the dashboard
+ *   storageApp.getWData()                     - weather data (backs the parent's own getWData(), which fuel
+ *                                                stream/piston children call via parent.getWData())
+ *   storageApp.listAvailableDevices(raw, offset) - devices available to $weather
+ *
+ * Calls the storage child makes to this app (parent.xxx()):
+ *   parent.isInstalled() / .getWikiUrl()      - install state and wiki link (storage app prefs page)
+ *   parent.refreshDevices()                   - notify parent the device list may need refreshing
+ *   parent.capabilities()                     - device capability list
+ *
+ * Browser dashboard (HTML/JS UI) -> this app interface.
+ * The web dashboard is not a child app; it's a browser SPA that calls the HTTP paths declared in the
+ * mappings{} block below, each backed by a private api_intf_dashboard_*()/api_intf_fuelstreams_*()
+ * handler that checks verifySecurityToken()/PIN before doing anything.
+ *
+ *   /intf/dashboard/load                 api_intf_dashboard_load          - initial load: full base result (see
+ *                                                                           api_get_base_result/clearBaseResult above)
+ *   /intf/dashboard/devices              api_intf_dashboard_devices       - paged device list
+ *   /intf/dashboard/refresh              api_intf_dashboard_refresh       - re-fetch live device attribute values
+ *   /intf/dashboard/piston/new           api_intf_dashboard_piston_new    - suggest a name for a new piston
+ *   /intf/dashboard/piston/create        api_intf_dashboard_piston_create - create a piston child app
+ *   /intf/dashboard/piston/backup        api_intf_dashboard_piston_backup - export one or more pistons as JSON
+ *   /intf/dashboard/piston/get           api_intf_dashboard_piston_get    - open a piston (full runtime data)
+ *   /intf/dashboard/piston/getDb         api_intf_dashboard_piston_getDb  - fetch the shared capability/command/
+ *                                                                           comparison "DB" the IDE needs
+ *   /intf/dashboard/piston/set           api_intf_dashboard_piston_set    - save a small piston in one shot
+ *   /intf/dashboard/piston/set.start
+ *   /intf/dashboard/piston/set.chunk
+ *   /intf/dashboard/piston/set.end       api_intf_dashboard_piston_set_{start,chunk,end} - save a large piston,
+ *                                                                           uploaded in chunks and reassembled
+ *   /intf/dashboard/piston/pause         api_intf_dashboard_piston_pause  - pause button
+ *   /intf/dashboard/piston/resume        api_intf_dashboard_piston_resume - resume button
+ *   /intf/dashboard/piston/set.bin       api_intf_dashboard_piston_set_bin - move a piston to a different bin
+ *   /intf/dashboard/piston/tile          api_intf_dashboard_piston_tile   - dashboard tile tap/click
+ *   /intf/dashboard/piston/set.category  api_intf_dashboard_piston_set_category
+ *   /intf/dashboard/piston/set.modified  api_intf_dashboard_piston_set_modified
+ *   /intf/dashboard/piston/logging       api_intf_dashboard_piston_logging - set a piston's logging level
+ *   /intf/dashboard/piston/clear.logs    api_intf_dashboard_piston_clear_logs
+ *   /intf/dashboard/piston/delete        api_intf_dashboard_piston_delete - delete a piston (see
+ *                                                                           invalidatePistonCaches() above)
+ *   /intf/dashboard/piston/evaluate      api_intf_dashboard_piston_evaluate - IDE "evaluate expression" feature
+ *   /intf/dashboard/piston/test          api_intf_dashboard_piston_test   - "test" button (dry run)
+ *   /intf/dashboard/piston/activity      api_intf_dashboard_piston_activity - poll a piston's live log/activity
+ *   /intf/dashboard/variable/set         api_intf_variable_set            - create/update/delete a global or
+ *                                                                           piston-local variable
+ *   /intf/dashboard/settings/set         api_intf_settings_set            - save Settings page changes
+ *   /intf/fuelstreams/list               api_intf_fuelstreams_list        - list fuel streams across canisters
+ *   /intf/fuelstreams/get                api_intf_fuelstreams_get         - fetch one stream's data points
+ *   /intf/dashboard/presence/create      api_intf_dashboard_presence_create - create a presence sensor device
+ *
+ * /gforward/:pistonIdOrName (api_forward) is also dashboard-driven - it's how an embedded graph tile/page is
+ * rendered - but despite the path name it forwards to a fuel stream child, not a piston (see graphChild above).
+ *
+ * The remaining mapped paths are NOT called by the HTML dashboard - they're separate external integrations:
+ *   /intf/location/entered, /exited, /updated - a companion presence/geofencing app updates a virtual
+ *                                                presence device (api_intf_location_*)
+ *   /ifttt/:eventName                         - IFTTT webhook trigger (api_ifttt)
+ *   /email/:pistonId                          - inbound email trigger (api_email)
+ *   /execute/:pistonIdOrName                  - generic external "run this piston" webhook (api_execute)
+ *   /global/:varName                          - external read of a global variable's value (api_global)
+ *   /tap, /tap/:tapId                         - mapped to "api_tap", but no api_tap() method is defined
+ *                                                anywhere in this file; these two paths are currently broken
  */
 
 //file:noinspection GroovySillyAssignment
@@ -32,7 +181,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - June 28, 2026'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - July 5, 2026'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -235,6 +384,11 @@ def pageMain(){
 	}
 	//webCoRE main page
 	dynamicPage((sNM): "pageMain", (sTIT): sBLK, install: true, uninstall: false){
+		if((Boolean)gtAS('disabled')==true){
+			section(){
+				paragraph span("(Disabled) Kill switch is active - all pistons are disabled", sCLRORG), (sREQ): true
+			}
+		}
 		if(!gtSetB('agreement')){
 			pageSectionDisclaimer()
 		}else{
@@ -992,34 +1146,39 @@ void updated(){
 	unschedule()
 	initialize()
 
-	Boolean chg,frcResub,verchg
+	Boolean chg,frcResub,verchg,ksDisable
 	chg=false
 	frcResub=false
 	verchg=false
+	ksDisable=false
 
 	String dis='disabled'
-	if((Boolean)gtAS(dis)!=gtSetB(dis)){
-		assignAS(dis,gtSetB(dis)==true)
+	Boolean wasDis=(Boolean)gtAS(dis)
+	Boolean nowDis=gtSetB(dis)==true
+	if(wasDis!=nowDis){
+		assignAS(dis,nowDis)
 		chg=true
+		if(wasDis && !nowDis) frcResub=true   // re-enable: force chld.updated() → resumeP()
+		if(!wasDis && nowDis) ksDisable=true  // kill switch on: unsubscribe all active pistons
 	}
 	Boolean s=gtSetB('logPistonExecutions')
 	if((Boolean)gtAS('lPE')!=s){
 		assignAS('lPE',s==true)
 		chg=true
 	}
-	if(gtAS('doResub')){
+	if(gtSt('doResub')){
 		chg=true
 		frcResub=true
 		verchg=true
 	}
 	String cV='cV'
 	String hV='hV'
-	String scV=(String)gtAS(cV)
-	String shV=(String)gtAS(hV)
+	String scV=(String)gtSt(cV)
+	String shV=(String)gtSt(hV)
 	if(scV!=sVER || shV!=sHVER){
 		debug "Detected version change ${scV} ${sVER} ${shV} ${sHVER}"
-		assignAS(cV,sVER)
-		assignAS(hV,sHVER)
+		assignSt(cV,sVER)
+		assignSt(hV,sHVER)
 		frcResub=true
 		chg=true
 		verchg=true
@@ -1031,11 +1190,13 @@ void updated(){
 	}
 	if(chg){
 		if(verchg){
+			if(ksDisable) assignSt('pendKsDis',true)
+			if(frcResub)  assignSt('pendFrcResub',true)
 			runIn(150, afterRun) // try to deal with people updating this file first vs. last with HPM
 			doLog(sINFO,"webCoRE scheduled install/upgrade completion in 150 seconds")
 			return
 		}else{
-			clearParentPistonCache("parent updated", frcResub, chg)
+			clearParentPistonCache("parent updated", frcResub, chg, ksDisable)
 			cleanUp()
 			resetFuelStreamList()
 		}
@@ -1044,9 +1205,11 @@ void updated(){
 }
 
 void afterRun(){
-	assignAS('doResub',false)
-	state.remove('doResub')
-	clearParentPistonCache("parent updated", true, true)
+	Boolean ksD=(Boolean)gtSt('pendKsDis')==true
+	assignSt('pendKsDis',false)
+	assignSt('pendFrcResub',false)
+	assignSt('doResub',false)
+	clearParentPistonCache("parent updated", true, true, ksD)
 	cleanUp()
 	resetFuelStreamList()
 	clearBaseResult('updated after')
@@ -1080,7 +1243,7 @@ Map gtPdata(){
 	]
 }
 
-private void clearParentPistonCache(String meth=sNL, Boolean frcResub=false, Boolean callAll=false){
+private void clearParentPistonCache(String meth=sNL, Boolean frcResub=false, Boolean callAll=false, Boolean ksDisable=false){
 	String wName=sAppId()
 	clearHashMap(wName)
 	acctlocFLD[wName]=null
@@ -1093,7 +1256,9 @@ private void clearParentPistonCache(String meth=sNL, Boolean frcResub=false, Boo
 	if(t0){
 		def t1=t0[iZ]
 		if(t1!=null) t1.clearParentCache(meth) // will cause one child to read gtPdata
-		if(frcResub){
+		if(ksDisable){
+			t0.each{ chld -> chld.killSwitchDisable() }
+		}else if(frcResub){
 			t0.sort().each{ chld -> // this runs updated on all child pistons
 				chld.updated()
 			}
@@ -1117,7 +1282,7 @@ void clearChldCaches(Boolean all=false, Boolean clrLogs=false, Boolean uber=fals
 	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
 	if(t0){
 		if(!cldClearFLD[wName]){ cldClearFLD[wName]=(Map)[:]; cldClearFLD=cldClearFLD }
-		if(clrLogs|uber){
+		if(clrLogs||uber){
 			t0.sort().each{ chld ->
 				Map a= !uber ? chld.clearLogsQ() : chld.clearAllQ()
 				String schld=chld.id.toString()
@@ -1165,7 +1330,7 @@ private Boolean uidChgd(){ return gtHubUID()!=(String)state.svUUID }
 
 private void initialize(){
 	Boolean chg; chg=false
-	Boolean reSub; reSub=(Boolean)gtAS('forceResub1')
+	Boolean reSub; reSub=(Boolean)gtSt('forceResub1')
 
 	if(uidChgd()){
 		reSub=null
@@ -1174,10 +1339,10 @@ private void initialize(){
 	}
 
 	String pS='properSID'
-	Boolean prpSid; prpSid=(Boolean)gtAS(pS)
+	Boolean prpSid; prpSid=(Boolean)gtSt(pS)
 	if(reSub==null){
-		assignAS('forceResub1',true)
-		assignAS(pS,null)
+		assignSt('forceResub1',true)
+		assignSt(pS,null)
 		prpSid=null
 		warn "SID reset requested"
 	}
@@ -1188,7 +1353,6 @@ private void initialize(){
 	Boolean sprp= gtSetB(pS)
 	if(prpSid==null || prpSid!=sprp){
 		Boolean t0=sprp!=null ? sprp : true
-		assignAS(pS,t0)
 		assignSt(pS,t0)
 		app.updateSetting(pS, [(sTYPE): sBOOL, (sVAL): t0])
 		initTokens()
@@ -1201,7 +1365,7 @@ private void initialize(){
 
 	if(checkSIDs()) chg=true
 
-	if(chg) assignAS('doResub',true)
+	if(chg) assignSt('doResub',true)
 
 	subscribeAll()
 	Map t0=(Map)gtAS(sVARS)
@@ -1577,6 +1741,13 @@ Map pitem(String pid, String n, Map meta){
 
 @Field static final String sCB='clearB'
 
+/**
+ * Invalidates the cached dashboard base result for this instance, forcing the next
+ * dashboard load to rebuild it, and resets the last-activity tracking for ALL
+ * sessions of this instance (not just the caller's), forcing every connected
+ * browser to be treated as stale. Call only after data the base result reflects
+ * has actually changed - not on every request or on failed/no-op operations.
+ */
 @CompileStatic
 private void clearBaseResult(String meth=sNL,String wNi=sNL){
 	String wName= wNi ?: sAppId()
@@ -1587,6 +1758,25 @@ private void clearBaseResult(String meth=sNL,String wNi=sNL){
 	clearLastDActivity(wName,sNL)
 	releaseTheLock(sCB)
 	//if(eric())debug "clearBaseResult "+meth
+}
+
+/**
+ * Invalidates every parent-side cache that a deleted piston can be found in: the cached
+ * child-app list, the piston metadata cache, the hash map cache, and the dashboard base
+ * result. Shared by the dashboard delete API and by pistonUninstalled() (called by a piston
+ * removed outside the dashboard, e.g. directly from the Hubitat Apps list) so both paths stay
+ * in sync.
+ */
+private void invalidatePistonCaches(String wName, String schld=sNL, String meth='delete Piston'){
+	if(schld){
+		if(!cldClearFLD[wName]){ cldClearFLD[wName]=(Map)[:]; cldClearFLD=cldClearFLD }
+		cldClearFLD[wName].remove(schld)
+	}
+	clearCachedchildApps(wName)
+	clearMeta(wName)
+	clearHashMap(wName)
+	mb()
+	clearBaseResult(meth,wName)
 }
 
 @Field volatile static Map<String,Map<String,Object>> base_resultFLD= [:]
@@ -1981,8 +2171,6 @@ private api_intf_dashboard_piston_getDb(){
 		result.dbVersion=serverDbVersion
 		result.db=theDb
 	}else{ result=api_get_error_result(sERRTOK,'getDb') }
-	String wName=sAppId()
-	clearBaseResult('get Db',wName)
 	result.put(sNOW,wnow())
 	renderRes(result)
 }
@@ -1990,8 +2178,6 @@ private api_intf_dashboard_piston_getDb(){
 private api_intf_dashboard_piston_get(){
 	Map result; result=[:]
 	Boolean requireDb
-	String wName=sAppId()
-	clearBaseResult('get Piston',wName)
 	String s='piston_get'
 	Map p=(Map)params
 	if(verifySecurityToken(p)){
@@ -2288,7 +2474,6 @@ private common_pause_resume(Map params, String oper, String msg){
 		}else result=api_get_error_result(sERRID)
 	}else result=api_get_error_result(sERRTOK)
 	debug "Dashboard: "+msg
-	clearBaseResult(oper,wName)
 	renderRes(result)
 }
 
@@ -2314,11 +2499,11 @@ private common_Simple(Map params, String msg, String oper, arg=null, Boolean clr
 				result=(Map)piston."${oper}"()
 			if(clrC){
 				ptMeta(wName,pid,null)
+				clearBaseResult(oper,wName)
 			}
 			result[sSTS]=sSUCC
 		}else result=api_get_error_result(sERRID)
 	}else result=api_get_error_result(sERRTOK)
-	if(clrC)clearBaseResult(oper,wName)
 	renderRes(result)
 }
 
@@ -2368,17 +2553,11 @@ private api_intf_dashboard_piston_delete(){
 		if(piston){
 			ptMeta(wName,id,null)
 			String schld=piston.id.toString()
-			if(!cldClearFLD[wName]){ cldClearFLD[wName]=(Map)[:]; cldClearFLD=cldClearFLD }
-			cldClearFLD[wName].remove(schld)
 			result=(Map)piston.deletePiston()
 			app.deleteChildApp(piston.id)
 //			p_executionFLD[wName][id]=null
 //			p_executionFLD=p_executionFLD
-			clearCachedchildApps(wName)
-			clearMeta(wName)
-			clearHashMap(wName)
-			mb()
-			clearBaseResult('delete Piston',wName)
+			invalidatePistonCaches(wName, schld)
 			result=[(sSTS): sSUCC]
 			//cleanUp()
 			//clearParentPistonCache("piston deleted")
@@ -2603,7 +2782,7 @@ private Long getMidnightTime(){
 
 
 
-private void resetFuelStreamList(){
+void resetFuelStreamList(){
 	state.fuelStreams=[]
 /*
 	name=handleFuelS()
@@ -2965,13 +3144,13 @@ private api_forward(){
 	data.referer=request.headers.Referer
 	String pistonIdOrName= sMs(p,'pistonIdOrName')
 	String msg
-	def piston= findPiston(pistonIdOrName,pistonIdOrName,handleFuelS())
+	def graphChild= findPiston(pistonIdOrName,pistonIdOrName,handleFuelS())
 	//private findPiston(String id, String nm=sNL, String n=handlePistn()){
 	//private static String handleFuelS(){ return sWC+sFUELS }
-	if(piston!=null){
-		msg = "External forward for graph ${(String)piston.label} request from IP $remoteAddr".toString()
+	if(graphChild!=null){
+		msg = "External forward for graph ${(String)graphChild.label} request from IP $remoteAddr".toString()
 		debug "Dashboard or web request received to forward to graph from IP $remoteAddr Referer: ${request.headers.Referer} " + msg
-		return piston.gforward(data.path)
+		return graphChild.gforward(data.path)
 	}else{
 		result.result='ERROR'
 		msg = "Fuel stream child not found for dashboard or web Request to forward to a graph $data from IP $remoteAddr $pistonIdOrName"
@@ -4211,6 +4390,14 @@ Map gtMeta(ichld, String wName, String pid){
 	return meta
 }
 
+/** child call made from its own uninstalled() when removed by a means other than the
+ *  dashboard delete API (e.g. removed directly from the Hubitat Apps list), so the parent's
+ *  cached piston list, metadata, and dashboard base result don't keep serving the deleted piston */
+void pistonUninstalled(id){
+	invalidatePistonCaches(sAppId(), id?.toString(), 'piston uninstalled')
+	runIn(21, broadcastPistonList)
+}
+
 /** child call to pause a piston */
 Boolean pausePiston(String pistonId,String src){
 	def piston=findPiston(pistonId,pistonId)
@@ -4919,7 +5106,7 @@ static String span(String str,String clr=sNL,String sz=sNL,Boolean bld=false,Boo
 	windowShade			: [ (sN): "Window Shade",			(sD): "automatic window shades",		(sA): "windowShade",	(sC): [sCLOSE, sOPEN, "setPosition", "startPositionChange", "stopPositionChange"],					],
 ]
 
-private Map capabilities(){
+Map capabilities(){
 	return capabilitiesFLD
 }
 
@@ -6173,7 +6360,7 @@ static void clearHashMap(String wName){
 
 private String sAppId(){ return ((Long)app.id).toString() }
 
-private String hashPID(id){
+String hashPID(id){
 	if(acctANDloc()) return hashId(locationSid()+id.toString()) //todo still not unique
 	return hashId(id)
 }
