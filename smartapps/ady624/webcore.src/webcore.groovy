@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update July 5, 2026 for Hubitat
+ * Last update July 7, 2026 for Hubitat
  */
 
 /*
@@ -181,7 +181,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - July 5, 2026'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - July 7, 2026'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -229,6 +229,16 @@ import groovy.transform.Field
 import java.security.MessageDigest
 import java.util.concurrent.Semaphore
 import java.util.zip.GZIPOutputStream
+
+import com.hubitat.hub.domain.Location
+import com.hubitat.hub.domain.Hub
+import com.hubitat.hub.domain.Capability
+//import com.hubitat.hub.domain.Command
+import com.hubitat.hub.domain.Attribute
+//import com.hubitat.hub.domain.Mode
+import com.hubitat.app.InstalledAppWrapper
+import com.hubitat.app.DeviceWrapper
+import com.hubitat.app.ChildDeviceWrapper
 
 preferences{
 	//UI pages
@@ -789,7 +799,7 @@ def graphDuplicationPage(){
 					grfData.settings["duplicateFlag"] = [(sTYPE): sBOOL, (sVAL): true]
 					// grfData?.settings["actionPause"] = [(sTYPE): sBOOL, (sVAL): true]
 					grfData.settings["duplicateSrcId"] = [(sTYPE): sTXT, (sVAL): grfId]
-					def a=addChildApp("ady624", handleFuelS(), nm, [settings: grfData.settings])
+					InstalledAppWrapper a= (InstalledAppWrapper)addChildApp("ady624", handleFuelS(), nm, [settings: grfData.settings])
 					paragraph "Graph Duplicated..." + "<br>Return to Graph Page and look for the App with '(Dup)' in the name..."
 					state.graphDuplicated = true
 				}else{ paragraph "Graph not Found" }
@@ -1074,8 +1084,8 @@ def pageDumpPCache(){
 def pageDumpGlob(){
 	String wName=sAppId()
 	String n=handlePistn()
-	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
-	def t1=t0[iZ]
+	List<InstalledAppWrapper> t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
+	InstalledAppWrapper t1=t0[iZ]
 	Map<String,List> t2= t1!=null ? (Map<String,List>)t1.gtGlobalVarsInUse() : [:]
 	Map<String,Object> newMap
 	newMap=[:]
@@ -1192,7 +1202,7 @@ void updated(){
 		if(verchg){
 			if(ksDisable) assignSt('pendKsDis',true)
 			if(frcResub)  assignSt('pendFrcResub',true)
-			runIn(150, afterRun) // try to deal with people updating this file first vs. last with HPM
+			wrunIn(150, 'afterRun') // try to deal with people updating this file first vs. last with HPM
 			doLog(sINFO,"webCoRE scheduled install/upgrade completion in 150 seconds")
 			return
 		}else{
@@ -1252,9 +1262,10 @@ private void clearParentPistonCache(String meth=sNL, Boolean frcResub=false, Boo
 	clearMeta(wName)
 	mb()
 	String n=handlePistn()
-	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
+	List<InstalledAppWrapper> t0
+	t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
 	if(t0){
-		def t1=t0[iZ]
+		InstalledAppWrapper t1=t0[iZ]
 		if(t1!=null) t1.clearParentCache(meth) // will cause one child to read gtPdata
 		if(ksDisable){
 			t0.each{ chld -> chld.killSwitchDisable() }
@@ -1279,7 +1290,8 @@ void clearChldCaches(Boolean all=false, Boolean clrLogs=false, Boolean uber=fals
 		clearMeta(wName)
 	}
 	Long t1=wnow()
-	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
+	List<InstalledAppWrapper> t0
+	t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
 	if(t0){
 		if(!cldClearFLD[wName]){ cldClearFLD[wName]=(Map)[:]; cldClearFLD=cldClearFLD }
 		if(clrLogs||uber){
@@ -1320,8 +1332,9 @@ void clearChldCaches(Boolean all=false, Boolean clrLogs=false, Boolean uber=fals
 private void clearGlobalPistonCache(String meth=null){
 	String wName=sAppId()
 	String n=handlePistn()
-	List t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
-	def t1=t0[iZ]
+	List<InstalledAppWrapper> t0
+	t0= childAppsRawFLD[wName] ?: wgetChildApps().findAll{ (String)it.name==n }
+	InstalledAppWrapper t1=t0[iZ]
 	if(t1!=null) t1.clearGlobalCache(meth) // will cause a child to read global Vars
 	t0=null
 }
@@ -1443,7 +1456,7 @@ private void checkWeather(){
 	if(wTyp || state.storAppOn){
 		String apiK= gtSetStr('apixuKey')
 		Boolean t0=wTyp && apiK
-		def storageApp=getStorageApp(t0)
+		InstalledAppWrapper storageApp=getStorageApp(t0)
 		if(storageApp!=null){
 			state.storAppOn=true
 			storageApp.settingsToState("weatherType", wTyp)
@@ -1549,7 +1562,7 @@ private void subscribeAll(){
 	subscribe(location, "hsmRules", hsmRulesHandler, [filterEvents: false])
 	subscribe(location, "hsmStatus", hsmHandler, [filterEvents: false])
 	subscribe(location, "hsmAlert", hsmAlertHandler, [filterEvents: false])
-	setPowerSource(getHub()?.isBatteryInUse() ? 'battery' : 'mains')
+	setPowerSource(((Hub)getHub())?.isBatteryInUse() ? 'battery' : 'mains')
 }
 
 /******************************************************************************/
@@ -1669,7 +1682,7 @@ static void releaseTheLock(String meth=sNL){
 }
 
 @Field volatile static Map<String,List<Map>> childAppsFLD= [:]
-@Field volatile static Map<String,List> childAppsRawFLD= [:]
+@Field volatile static Map<String,List<InstalledAppWrapper>> childAppsRawFLD= [:]
 @Field static final String sGTCACHED='getCached'
 
 List<Map> gtCachedchildApps(String wName,Boolean haveLock=false){
@@ -1677,7 +1690,7 @@ List<Map> gtCachedchildApps(String wName,Boolean haveLock=false){
 	res= childAppsFLD[wName]
 	if(!res){
 		String n=handlePistn()
-		List freshRaw= wgetChildApps().findAll{ (String)it.name==n }.sort{ (String)it.label }
+		List<InstalledAppWrapper> freshRaw= wgetChildApps().findAll{ (String)it.name==n }.sort{ (String)it.label }
 		List<Map> fresh= freshRaw.collect{
 			String pid=hashPID(it.id)
 			[ (sID): it.id.toString(), pid: pid, (sNM): (String)it.name, label: (String)it.label, nlabel: normalizeLabel(it) ]
@@ -1698,6 +1711,12 @@ List<Map> gtCachedchildApps(String wName,Boolean haveLock=false){
 
 @Field static final String sCLRCACHED='clearCached'
 
+/**
+ * Empties the cached child-app (piston) list and its raw counterpart for this instance,
+ * forcing the next lookup to rebuild them from the live child apps. Does not touch piston
+ * metadata, the hash map cache, or the dashboard base result - use invalidatePistonCaches()
+ * instead when a piston has actually been deleted/uninstalled.
+ */
 void clearCachedchildApps(String wName, Boolean haveLock=false){
 	if(!haveLock) Boolean didw=getTheLock(sCLRCACHED)
 		childAppsFLD[wName]= []
@@ -2048,12 +2067,12 @@ private api_intf_dashboard_refresh(){
 private Map getDashboardData(){
 //	def start=wnow()
 	Map result
-	def storageApp //= getStorageApp()
+	InstalledAppWrapper storageApp //= getStorageApp()
 	if(storageApp!=null){
 		result=storageApp.getDashboardData()
 	}else{
 		result=((Map<String,Object>)settings).findAll{ ((String)it.key).startsWith("dev:") }.values().flatten().collectEntries{ dev ->
-			[ (hashId(dev.id)): ((List<String>)((List)dev.getSupportedAttributes()).collect{ (String)it.name }).unique().collectEntries{
+			[ (hashId(dev.id)): ((List<String>)((List<Attribute>)dev.getSupportedAttributes()).collect{ (String)it.name }).unique().collectEntries{
 				def value
 				try { value=dev.currentValue(it) }catch(ignored){ value=null }
 				return [ (it) : value]
@@ -2092,7 +2111,7 @@ private api_intf_dashboard_piston_create(){
 		apps=null
 		if(!found){
 			try{
-				def piston=addChildApp("ady624", handlePistn(), pname)
+				InstalledAppWrapper piston= (InstalledAppWrapper)addChildApp("ady624", handlePistn(), pname)
 				debug "created piston $piston.id params $p"
 				if(sMs(p,'author')!=sNL || sMs(p,'bin')!=sNL){
 					piston.config([bin: sMs(p,'bin'), author: sMs(p,'author'), initialVersion: sVER])
@@ -2112,12 +2131,12 @@ private api_intf_dashboard_piston_create(){
 	renderRes(result)
 }
 
-private findPiston(String id, String nm=sNL, String n=handlePistn()){
+InstalledAppWrapper findPiston(String id, String nm=sNL, String n=handlePistn()){
 	if(id==sNL && nm==sNL) return null
 	// Fast path: piston apps are in the lightweight cache with precomputed pid/nlabel
 	if(n==handlePistn()){
 		String wName=sAppId()
-		String matchedId=sNL
+		String matchedId; matchedId=sNL
 		List<Map> cached=gtCachedchildApps(wName)
 		if(id!=sNL){
 			for(Map entry in cached){
@@ -2134,7 +2153,8 @@ private findPiston(String id, String nm=sNL, String n=handlePistn()){
 	}
 	// Non-piston child apps (e.g. fuel stream): original scan
 	List t0=wgetChildApps().findAll{ (String)it.name==n }
-	def piston=null
+	InstalledAppWrapper piston
+	piston=null
 	if(id!=sNL){
 		piston=t0.find{ hashPID(it.id)==id || hashId(it.id)==id }
 	}
@@ -2182,7 +2202,7 @@ private api_intf_dashboard_piston_get(){
 	Map p=(Map)params
 	if(verifySecurityToken(p)){
 		String pistonId=sMs(p,'id')
-		def piston=findPiston(pistonId)
+		InstalledAppWrapper piston=findPiston(pistonId)
 		if(piston){
 			debug "Dashboard: Request received to get piston ${pistonId} ${(String)piston.label}"
 
@@ -2285,7 +2305,7 @@ private api_intf_dashboard_piston_backup(){
 		List pistonIds=(sMs(p,'ids') ?: sBLK).tokenize(',')
 		String myN= appName()
 		for(String pistonId in pistonIds){
-			def piston=findPiston(pistonId)
+			InstalledAppWrapper piston=findPiston(pistonId)
 			if(piston){
 				Map pd=(Map)piston.get(true)
 				if(pd){
@@ -2315,7 +2335,7 @@ private String decodeEmoji(String value){
 }
 
 private Map api_intf_dashboard_piston_set_save(String id, String data, Map<String,String>chunks){
-	def piston=findPiston(id)
+	InstalledAppWrapper piston=findPiston(id)
 	String myS="Dashboard: Request received to set_save"
 	if(piston){
 		debug myS
@@ -2332,7 +2352,7 @@ private Map api_intf_dashboard_piston_set_save(String id, String data, Map<Strin
 		Map result=(Map)piston.setup(p, chunks)
 		String wName=sAppId()
 		clearCachedchildApps(wName) // name may change
-		runIn(21, broadcastPistonList)
+		wrunIn(21, 'broadcastPistonList')
 		return result
 	}
 	debug myS+" $id $chunks NOT FOUND"
@@ -2352,8 +2372,6 @@ private api_intf_dashboard_piston_set(){
 			if(saved.rtData){
 				updateRunTimeData((Map)saved.rtData)
 				saved.rtData=null
-				String wName=sAppId()
-				clearCachedchildApps(wName)
 			}
 			result=[(sSTS): sSUCC] + saved
 		}else{ result=[(sSTS): sERROR, (sERR): sERRUNK] }
@@ -2444,7 +2462,6 @@ private api_intf_dashboard_piston_set_end(){
 					if(saved.rtData){
 						updateRunTimeData((Map)saved.rtData)
 						saved.rtData=null
-						clearCachedchildApps(wName)
 					}
 					result=[(sSTS): sSUCC] + saved
 				}else{ result=[(sSTS): sERROR, (sERR): sERRUNK] }
@@ -2458,7 +2475,7 @@ private common_pause_resume(Map params, String oper, String msg){
 	Map result
 	String wName=sAppId()
 	if(verifySecurityToken(params)){
-		def piston=findPiston(sMs(params,sID))
+		InstalledAppWrapper piston=findPiston(sMs(params,sID))
 		if(piston){
 			Map rtData
 			if(oper!='resume')
@@ -2469,7 +2486,7 @@ private common_pause_resume(Map params, String oper, String msg){
 			result=[:]+(Map)rtData.result
 			updateRunTimeData(rtData)
 			clearCachedchildApps(wName)
-			runIn(21, broadcastPistonList)
+			wrunIn(21, 'broadcastPistonList')
 			result[sSTS]=sSUCC
 		}else result=api_get_error_result(sERRID)
 	}else result=api_get_error_result(sERRTOK)
@@ -2491,7 +2508,7 @@ private common_Simple(Map params, String msg, String oper, arg=null, Boolean clr
 	String wName=sAppId()
 	if(verifySecurityToken(params)){
 		String pid=sMs(params,sID)
-		def piston=findPiston(pid)
+		InstalledAppWrapper piston=findPiston(pid)
 		if(piston){
 			if(arg!=null)
 				result=(Map)piston."${oper}"(arg)
@@ -2549,7 +2566,7 @@ private api_intf_dashboard_piston_delete(){
 	Map p=(Map)params
 	if(verifySecurityToken(p)){
 		String id=sMs(p,'id')
-		def piston=findPiston(id)
+		InstalledAppWrapper piston=findPiston(id)
 		if(piston){
 			ptMeta(wName,id,null)
 			String schld=piston.id.toString()
@@ -2561,7 +2578,7 @@ private api_intf_dashboard_piston_delete(){
 			result=[(sSTS): sSUCC]
 			//cleanUp()
 			//clearParentPistonCache("piston deleted")
-			runIn(21, broadcastPistonList)
+			wrunIn(21, 'broadcastPistonList')
 		}else{ result=api_get_error_result(sERRID) }
 	}else{ result=api_get_error_result(sERRTOK) }
 	renderRes(result)
@@ -2572,7 +2589,7 @@ private api_intf_dashboard_presence_create(){
 	Map p=(Map)params
 	if(verifySecurityToken(p)){
 		String dni=sMs(p,'dni')
-		def sensor=(dni ? wgetChildDevices().find{ (String)it.getDeviceNetworkId()==dni } : null) ?: addChildDevice("ady624", handlePres(), dni ?: hashId("${wnow()}"), null, [label: sMs(p,'name')])
+		ChildDeviceWrapper sensor=(dni ? wgetChildDevices().find{ (String)it.getDeviceNetworkId()==dni } : null) ?: (ChildDeviceWrapper)addChildDevice("ady624", handlePres(), dni ?: hashId("${wnow()}"), null, [label: sMs(p,'name')])
 		if(sensor){
 			sensor.label=sMs(p,'name')
 			result=[
@@ -2749,7 +2766,7 @@ private api_intf_variable_set(){
 				result=[(sSTS): sSUCC]+[globalVars: globalVars]
 			}else result=[(sSTS): sERROR, (sERR): sERRUNK]
 		}else{
-			def piston=findPiston(pid)
+			InstalledAppWrapper piston=findPiston(pid)
 			if(piston){
 				localVars=(Map)piston.setLocalVariable(name, value?.v)
 				//clearBaseResult('api_intf_variable_set')
@@ -2792,13 +2809,13 @@ void resetFuelStreamList(){
 	state.remove("fuelStreams")
 }
 
-def findCreateFuel(Map req){
+InstalledAppWrapper findCreateFuel(Map req){
 	String n=handleFuelS()
-	def result; result=null
+	InstalledAppWrapper result; result=null
 
 	// LTS can return multple streams
 	if(req[sC] == 'LTS'){
-		def lts = gtLTS()
+		InstalledAppWrapper lts = gtLTS()
 		String[] s= sMs(req,sN).split('_')
 		String sensorId= s[iZ]
 		String attribute= s[i1]
@@ -2808,10 +2825,10 @@ def findCreateFuel(Map req){
 
 	}else{
 		String streamName="${(req[sC] ?: sBLK)}||${req[sN]}"
-		List allFuel=wgetChildApps().findAll{ (String)it.name==n }
-		List l
+		List<InstalledAppWrapper> allFuel=wgetChildApps().findAll{ (String)it.name==n }
+		List<InstalledAppWrapper> l
 		l=allFuel.findAll{ ((String)it.label)?.contains(streamName) }
-		for (sa in l){
+		for (InstalledAppWrapper sa in l){
 			String sl=(String)sa.label
 			Integer ndx=sl.indexOf(' - ' )
 			if(ndx >= iZ){
@@ -2831,7 +2848,7 @@ def findCreateFuel(Map req){
 			allFuel=null
 			Integer id=(t0 ?: iZ) + i1
 			try{
-				result=addChildApp('ady624', n, "$id - $streamName")
+				result=(InstalledAppWrapper)addChildApp('ady624', n, "$id - $streamName")
 				result.createStream([(sID): id, (sNM): req[sN], canister: req[sC] ?: sBLK])
 			}
 			catch(ignored){
@@ -2971,7 +2988,7 @@ Map openWeatherConfig(){ // used by graphs/fuel stream
 }
 
 Map getWData(){
-	def storageApp=getStorageApp(true)
+	InstalledAppWrapper storageApp=getStorageApp(true)
 	Map t0
 	t0=[:]
 	if(storageApp){
@@ -3017,7 +3034,7 @@ private api_intf_dashboard_piston_evaluate(){
 	debug "Dashboard: Request received to evaluate an expression"
 	Map p=(Map)params
 	if(verifySecurityToken(p)){
-		def piston=findPiston(sMs(p,'id'))
+		InstalledAppWrapper piston=findPiston(sMs(p,'id'))
 		if(piston){
 			List<Map> vars; vars=null
 			try{
@@ -3040,7 +3057,7 @@ private api_intf_dashboard_piston_activity(){
 	if(verifySecurityToken(p)){
 		msg+=' security ok'
 		String pistonId=sMs(p,'id')
-		def piston=findPiston(pistonId)
+		InstalledAppWrapper piston=findPiston(pistonId)
 		if(piston!=null){
 			String wName=sAppId()
 			String sess=sMs(p,'session') ?: 'default'
@@ -3144,7 +3161,7 @@ private api_forward(){
 	data.referer=request.headers.Referer
 	String pistonIdOrName= sMs(p,'pistonIdOrName')
 	String msg
-	def graphChild= findPiston(pistonIdOrName,pistonIdOrName,handleFuelS())
+	InstalledAppWrapper graphChild= findPiston(pistonIdOrName,pistonIdOrName,handleFuelS())
 	//private findPiston(String id, String nm=sNL, String n=handlePistn()){
 	//private static String handleFuelS(){ return sWC+sFUELS }
 	if(graphChild!=null){
@@ -3183,7 +3200,7 @@ private api_execute(){
 	data.referer=request.headers.Referer
 	String pistonIdOrName=sMs(p,'pistonIdOrName')
 	String msg
-	def piston= findPiston(pistonIdOrName,pistonIdOrName)
+	InstalledAppWrapper piston= findPiston(pistonIdOrName,pistonIdOrName)
 	if(piston!=null){
 		msg = "External piston execute ${(String)piston.label} request from IP $remoteAddr".toString()
 		sendExecuteEvt(hashPID(piston.id),
@@ -3295,7 +3312,7 @@ void recoveryHandler(){
 	if(lastRecovered!=0L && (t-lastRecovered) < recTime) return
 	lastRecoveredFLD[wName]=t
 	Integer delay=Math.round(200.0D * Math.random()).toInteger() // seconds
-	runIn(delay, finishRecovery)
+	wrunIn(delay, 'finishRecovery')
 }
 
 @CompileStatic
@@ -3353,7 +3370,7 @@ private void cleanUp(){
 
 		String wName=sAppId()
 		String pid
-		List<Map> t0=gtCachedchildApps(wName)
+		List<Map> t0; t0=gtCachedchildApps(wName)
 		for(Map it in t0){
 			pid=hashId((String)it[sID])
 			state.remove(pid)
@@ -3365,13 +3382,13 @@ private void cleanUp(){
 	}catch(ignored){}
 }
 
-private getStorageApp(Boolean install=false){
+InstalledAppWrapper getStorageApp(Boolean install=false){
 	String n=handleStor()
-	def storageApp
+	InstalledAppWrapper storageApp
 	storageApp=wgetChildApps().find{ (String)it.name==n }
 
 	String n1=handleWeat()
-	def weatDev
+	ChildDeviceWrapper weatDev
 	weatDev=wgetChildDevices().find{ (String)it.name==n1 }
 
 	if(storageApp!=null){
@@ -3401,7 +3418,7 @@ private getStorageApp(Boolean install=false){
 	if(install){
 		if(storageApp==null){
 			try{
-				storageApp=addChildApp("ady624", n, label)
+				storageApp=(InstalledAppWrapper)addChildApp("ady624", n, label)
 			}catch(ignored){
 				error "Please install the webCoRE Storage App for \$weather to work"
 				return null
@@ -3409,7 +3426,7 @@ private getStorageApp(Boolean install=false){
 		}
 		if(weatDev==null){
 			try{
-				weatDev=addChildDevice("ady624", n1, hashId("${wnow()}"), null, [label: label1])
+				weatDev=(ChildDeviceWrapper)addChildDevice("ady624", n1, hashId("${wnow()}"), null, [label: label1])
 			}catch(ignored){
 //				error "Please install the webCoRE Weather Device for \$weather notification to work"
 //				return null
@@ -3538,26 +3555,35 @@ private String getDashboardRegistrationUrl(){
 	return "https://api.${domain()}/dashboard/".toString()
 }
 
-Map listAvailableDevices(Boolean raw=false, Boolean batch=true, Integer offset=iZ){
+Map<String,Object> listAvailableDevices(Boolean raw=false, Boolean batch=true, Integer offset=iZ){
 	Long time=wnow()
-	def storageApp //=getStorageApp()
-	Map result; result=[:]
+	InstalledAppWrapper storageApp //=getStorageApp()
+	Map<String,Object> result; result=[:]
+	Map<String,DeviceWrapper> rawResult; rawResult=[:]
+
 	if(storageApp){
-		result=storageApp.listAvailableDevices(raw, offset)
+		if (raw)
+			rawResult=storageApp.listAvailableDevices(raw, offset)
+		else
+			result=storageApp.listAvailableDevices(raw, offset)
 	}else{
-		List myDevices
-		myDevices=(List)((Map<String,Object>)settings).findAll{ it.key.startsWith("dev:") }.collect{ it.value }.flatten().sort{ it.getDisplayName() }
-		List devices
-		devices=(List)myDevices.unique{ it.id }
+		List<DeviceWrapper> myDevices
+		myDevices=(List<DeviceWrapper>)((Map<String,Object>)settings).findAll{
+			it.key.startsWith("dev:") }.collect{
+				it.value }.flatten().sort{ it.getDisplayName() }
+
+		List<DeviceWrapper> devices; devices=myDevices.unique{ it.id }
+
 		if(raw){
-			result=devices.collectEntries{ dev -> [(hashId(dev.id)): dev]}
+			rawResult=devices.collectEntries{ DeviceWrapper dev -> [(hashId(dev.id)): dev]}
+
 		}else{
 			Integer deviceCount=devices.size()
 			result.devices=[:]
 			if(devices){
 				devices=devices[offset..-i1]
 				Integer dsz=devices.size()
-				result.complete=!devices.indexed().find{ Integer idx, dev ->
+				result.complete=!devices.indexed().find{ Integer idx, DeviceWrapper dev ->
 //				log.debug "Loaded device at ${idx} after ${now() - time}ms. Data size is ${result.toString().size()}"
 					result.devices[hashId(dev.id)]=getDevDetails(dev, true)
 
@@ -3579,20 +3605,21 @@ Map listAvailableDevices(Boolean raw=false, Boolean batch=true, Integer offset=i
 	}
 	if(raw || (Boolean)result.complete){
 		String n=handlePres()
-		List presenceDevices
+		List<ChildDeviceWrapper> presenceDevices
 		presenceDevices=wgetChildDevices().findAll{ (String)it.name==n }
 		if(presenceDevices && presenceDevices.size()){
 			if(raw){
-				result << presenceDevices.collectEntries{ dev -> [(hashId(dev.id)): dev]}
+				rawResult << presenceDevices.collectEntries{ ChildDeviceWrapper dev -> [(hashId(dev.id)): dev]}
 			}else{
-				result.devices << presenceDevices.collectEntries{ dev -> [(hashId(dev.id)): dev]}.collectEntries{ id, dev ->
-					[ (id): getDevDetails(dev) ]
+				result.devices << presenceDevices.collectEntries{ ChildDeviceWrapper dev ->
+					[(hashId(dev.id)): dev]}.collectEntries{ id, dev ->
+						[ ((String)id): getDevDetails((DeviceWrapper)dev) ]
 				}
 			}
 		}
 		presenceDevices=null
 	}
-	return result
+	return raw ? rawResult : result
 }
 
 // additional device attributes that do not trigger
@@ -3601,11 +3628,11 @@ Map listAvailableDevices(Boolean raw=false, Boolean batch=true, Integer offset=i
 @Field static final String sROOMID='roomIdWC'
 @Field static final String sROOMNM='roomNameWC'
 
-Map getDevDetails(dev, Boolean addtransform=false){
+Map getDevDetails(DeviceWrapper dev, Boolean addtransform=false){
 	Map<String,Map> overrides=commandOverrides()
-	String dnm=dev.getDisplayName()
+	String dnm=(String)dev.getDisplayName()
 	List<Map> newCL; newCL=[]
-	List cmdL; cmdL=dev.getSupportedCommands()
+	List cmdL; cmdL=(List)dev.getSupportedCommands()
 	// List dev.getCapabilities()
 	//if(eric()) error("DEVICE $dnm")
 	//if(eric()) warn("COMMANDS $cmdL")
@@ -3695,7 +3722,7 @@ Map getDevDetails(dev, Boolean addtransform=false){
 		}
 	}
 
-	List attrs= ((List)dev.getSupportedAttributes()).unique{ (String)it.name }.collect{
+	List attrs= ((List<Attribute>)dev.getSupportedAttributes()).unique{ (String)it.name }.collect{
 		[ (sN): (String)it.name, (sT): it.getDataType(), (sO): it.getValues() ]
 	}
 	//attrs.push([(sN):sDLRSTS,(sT):sSTR,(sO):null])
@@ -3704,9 +3731,9 @@ Map getDevDetails(dev, Boolean addtransform=false){
 	attrs.push([(sN):sROOMNM,(sT):sSTR,(sO):null])
 	Map res=[
 		(sN): dnm,
-		cn: dev.getCapabilities()*.name,
+		cn: ((List<Capability>)dev.getCapabilities())*.name,
 		(sA): attrs,
-		/*((List)dev.getSupportedAttributes()).unique{ (String)it.name }.collect{
+		/*((List<Attribute>)dev.getSupportedAttributes()).unique{ (String)it.name }.collect{
 			//Map x=[
 			[
 				(sN): (String)it.name,
@@ -3825,14 +3852,15 @@ private void initTokens(){
 private Boolean verifySecurityToken(Map params){
 	String tokenId=sMs(params,'token')
 	if(!tokenId) return false
-	LinkedHashMap<String,Long> tokens=securityTokensFLD
+	LinkedHashMap<String,Long> tokens
+	tokens=securityTokensFLD
 	if(tokens==null){
 		tokens=(LinkedHashMap<String,Long>)gtSt(sSECTOKENS)
 		if(!tokens) return false
 		securityTokensFLD=tokens
 	}
 	Long threshold=wnow()
-	Boolean modified=false
+	Boolean modified; modified=false
 	//remove all expired tokens
 	for(token in tokens.findAll{ (Long)it.value < threshold }){
 		tokens.remove((String)token.key)
@@ -3853,7 +3881,8 @@ private Boolean verifySecurityToken(Map params){
 private String createSecurityToken(){
 	trace "Dashboard: Generating new security token after a successful PIN authentication"
 	String token=UUID.randomUUID().toString()
-	LinkedHashMap<String,Long> tokens=securityTokensFLD
+	LinkedHashMap<String,Long> tokens
+	tokens=securityTokensFLD
 	if(tokens==null){
 		Map a=(Map)gtAS(sSECTOKENS)
 		tokens=(a ?: [:]) as LinkedHashMap<String,Long>
@@ -3880,9 +3909,9 @@ private void ping(){
 
 private void startDashboard(){
 	//debug "startDashboard"
-	def dashboardApp=getDashboardApp()
+	InstalledAppWrapper dashboardApp=getDashboardApp()
 	if(!dashboardApp) return //false
-	Map t0=listAvailableDevices(true)
+	Map<String, DeviceWrapper> t0= listAvailableDevices(true) as Map<String,DeviceWrapper>
 	dashboardApp.start(t0.collect{ it.value }, getInstanceSid())
 	if((String)state.dashboard!=sACT){
 		assignAS('dashboard',sACT)
@@ -3955,7 +3984,7 @@ private void testLifx(){
 	String token=state.settings?.lifx_token
 	if(!token) return
 	testLifx1(true)
-	runIn(4, testLifx1)
+	wrunIn(4, 'testLifx1')
 }
 
 void testLifx1(Boolean first=false){
@@ -4095,7 +4124,7 @@ private String mem(Boolean showBytes=true){
 	return Math.round(100.0D * (bytes/ 100000.0D)) + "%${showBytes ? " ($bytes bytes)" : sBLK}"
 }
 
-private gtLTS(){ wgetChildAppByLabel("webCoRE Long Term Storage") }
+InstalledAppWrapper gtLTS(){ wgetChildAppByLabel("webCoRE Long Term Storage") }
 
 
 
@@ -4104,11 +4133,11 @@ private String gtHubUID(){ return hubUID.toString() }
 private Boolean isHubitat(){ return hubUID!=null }
 
 private getHub(){
-	return ((List)location.getHubs()).find{ (String)it.getType()=='PHYSICAL' }
+	return ((List<Hub>)location.getHubs()).find{ (String)it.getType()=='PHYSICAL' }
 }
 
 private List<Map> gtHubs(){
-	List a= (List)location.getHubs()
+	List<Hub> a= (List<Hub>)location.getHubs()
 	return a.collect{ it ->
 		Long id=it.getId()
 		[
@@ -4125,21 +4154,31 @@ private Map getHubitatVersion(){
 } */
 
 private static TimeZone mTZ(){ return TimeZone.getDefault() }
-private gtLocation(){ return location }
-private String gtLtScale(){ return (String)location.getTemperatureScale() }
-private String gtLname(){ return (String)location.getName() }
-private String gtLzip(){ return (String)location.zipCode }
-private String gtLlat(){ return ((BigDecimal)location.latitude).toString() }
-private String gtLlong(){ return ((BigDecimal)location.longitude).toString() }
-private String gtLhsmStatus(){ return (String)location.hsmStatus }
+
+Location gtLocation(){ return (Location)getLocation() }
+private String gtLtScale(){ return (String)gtLocation().getTemperatureScale() }
+private String gtLname(){ return (String)gtLocation().getName() }
+private String gtLzip(){ return (String)gtLocation().zipCode }
+private String gtLlat(){ return ((BigDecimal)gtLocation().latitude).toString() }
+private String gtLlong(){ return ((BigDecimal)gtLocation().longitude).toString() }
+private String gtLhsmStatus(){ return (String)gtLocation().hsmStatus }
+
 private Map gtCurrentMode(){
-	def a=location.getCurrentMode()
+	def a= gtLocation().getCurrentMode()
 	if(a)return [(sID):(Long)a.getId(),(sNM): (String)a.getName()]
 	return null
 }
 private List<Map> gtModes(){
-	List modes= (List)location.getModes()
+	List modes= (List)gtLocation().getModes()
 	return modes.collect{ [(sID): (Long)it.getId(), (sNM): (String)it.getName()] }
+}
+
+private Map getLocationModeOptions(){
+	Map result=[:]
+	for (mode in (List)gtLocation().modes){
+		if(mode) result[hashId((Long)mode.getId())]=(String)mode.getName()
+	}
+	return result
 }
 
 private gtSetting(String nm){ return settings.get(nm) }
@@ -4154,10 +4193,10 @@ private void assignAS(String nm,v){ atomicState.put(nm,v) }
 private Date wtoDateTime(String s){ return (Date)toDateTime(s) }
 private Date wtimeToday(String str,TimeZone tz){ return (Date)timeToday(str,tz) }
 Long wnow(){ return (Long)now() }
-List wgetChildApps(){ return (List)getChildApps() }
-def wgetChildDevice(String d){ return getChildDevice(d) }
-List wgetChildDevices(){ return (List)getChildDevices() }
-private wgetChildAppByLabel(String n){ getChildAppByLabel(n) }
+List<InstalledAppWrapper> wgetChildApps(){ return (List<InstalledAppWrapper>)getChildApps() }
+ChildDeviceWrapper wgetChildDevice(String d){ return (ChildDeviceWrapper)getChildDevice(d) }
+List<ChildDeviceWrapper> wgetChildDevices(){ return (List<ChildDeviceWrapper>)getChildDevices() }
+InstalledAppWrapper wgetChildAppByLabel(String n){ (InstalledAppWrapper)getChildAppByLabel(n) }
 
 private Map renderRes(Map result){
 	//debug "wrender: params: ${params} "
@@ -4381,7 +4420,7 @@ Map gtMeta(ichld, String wName, String pid){
 		if(pStateFLD[wName]==null){ clearMeta(wName) }
 		meta= pStateFLD[wName][pid]
 		if(meta==null){
-			def chld= ichld ?: findPiston(pid)
+			InstalledAppWrapper chld= ichld ?: findPiston(pid)
 			if(chld) meta= (Map)chld.curPState()
 			else error "gtMeta no child"
 			if(meta) ptMeta(wName, pid, meta)
@@ -4395,18 +4434,18 @@ Map gtMeta(ichld, String wName, String pid){
  *  cached piston list, metadata, and dashboard base result don't keep serving the deleted piston */
 void pistonUninstalled(id){
 	invalidatePistonCaches(sAppId(), id?.toString(), 'piston uninstalled')
-	runIn(21, broadcastPistonList)
+	wrunIn(21, 'broadcastPistonList')
 }
 
 /** child call to pause a piston */
 Boolean pausePiston(String pistonId,String src){
-	def piston=findPiston(pistonId,pistonId)
+	InstalledAppWrapper piston=findPiston(pistonId,pistonId)
 	if(piston){
 		Map rtData=piston.pausePiston()
 		updateRunTimeData(rtData)
 		String wName=sAppId()
 		clearCachedchildApps(wName)
-		runIn(21, broadcastPistonList)
+		wrunIn(21, 'broadcastPistonList')
 		return true
 	}
 	return false
@@ -4414,13 +4453,13 @@ Boolean pausePiston(String pistonId,String src){
 
 /** child call to resume a piston */
 Boolean resumePiston(String pistonId,String src){
-	def piston=findPiston(pistonId,pistonId)
+	InstalledAppWrapper piston=findPiston(pistonId,pistonId)
 	if(piston){
 		Map rtData=piston.resume()
 		updateRunTimeData(rtData)
 		String wName=sAppId()
 		clearCachedchildApps(wName)
-		runIn(21, broadcastPistonList)
+		wrunIn(21, 'broadcastPistonList')
 		return true
 	}
 	return false
@@ -4428,7 +4467,7 @@ Boolean resumePiston(String pistonId,String src){
 
 /** child call to find out if a piston is paused */
 Boolean isPisPaused(String pistonId){
-	def piston=findPiston(pistonId,pistonId)
+	InstalledAppWrapper piston=findPiston(pistonId,pistonId)
 	Map meta; meta=null
 	if(piston){
 		String wName=sAppId()
@@ -4445,7 +4484,7 @@ Boolean isPisPaused(String pistonId){
 
 /** child call to have parent execute a piston */
 Boolean executePiston(String pistonId, Map data, String src){
-	def piston=findPiston(pistonId,pistonId)
+	InstalledAppWrapper piston=findPiston(pistonId,pistonId)
 	if(piston){
 		piston.execute(data, src)
 		return true
@@ -4512,7 +4551,8 @@ void broadcastPistonList(Boolean frc=false){
 	trace "broadcastPistonList sent (${t.size()})"
 }
 
-private void wrunInMillis(Long t,String m,Map d){ runInMillis(t,m,d) }
+private void wrunInMillis(Long t,String m,Map d=null){ runInMillis(t,m,d) }
+private void wrunIn(Long t,String m,Map d=null){ runIn(t,m,d) }
 
 def webCoREHandler(event){
 	String eN=(String)event.name
@@ -4552,7 +4592,7 @@ def webCoREHandler(event){
 	switch (eV){
 		case 'poll':
 			Long delay=Math.round(2000.0D * Math.random())
-			wrunInMillis(delay,'broadcastPistonList',[:])
+			wrunInMillis(delay,'broadcastPistonList')
 			//wpauseExecution(delay)
 			//broadcastPistonList()
 			break
@@ -4782,7 +4822,7 @@ void startHandler(evt){
 	lastRecoveredFLD[wName]=0L
 	lastRegFLD[wName]=0L
 	lastRegTryFLD[wName]=0L
-	runIn(20, startWork)
+	wrunIn(20, 'startWork')
 }
 
 void startWork(){
@@ -5871,13 +5911,6 @@ def getLifxToken(){
 	return (module && module.connected ? module.token : null)
 }
 */
-private Map getLocationModeOptions(){
-	Map result=[:]
-	for (mode in location.modes){
-		if(mode) result[hashId((Long)mode.getId())]=(String)mode.name
-	}
-	return result
-}
 private static Map<String,String> getAlarmSystemStatusActions(){
 	return [
 		armAway:		"Arm Away", // intrusion

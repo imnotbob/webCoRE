@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update July 5, 2026 for Hubitat
+ * Last update July 6, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -53,6 +53,11 @@ import java.time.*
 //import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.concurrent.Semaphore
+
+import com.hubitat.app.DeviceWrapper
+import com.hubitat.hub.domain.Location
+import com.hubitat.hub.domain.Event
+import com.hubitat.hub.domain.State
 
 definition(
 	name:handle()+' Piston',
@@ -1368,7 +1373,7 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 	Map r9; r9=[:]
 	r9[sPISTN]=piston
 	releaseTheLock(mSmaNm)
-	Map mst=gtState()
+	Map mst; mst=gtState()
 	Integer i= iMs(mst,sBLD)
 	Boolean b= bIs(mst,sACT)
 	if(i==i1 || b)r9= resumeP(piston,false)
@@ -2809,11 +2814,11 @@ void execute(Map data,String src){
 }
 
 
-/** called as runInMillis */
+/** called by runInMillis */
 void resumeHandler(){ commonHandle(sPSTNRSM) }
 
 @Field static final String sTIMHNDR='timeHandler'
-/** called as runInMillis; it really is not an event */
+/** called by runInMillis; it really is not an event */
 void timeHandler(event){ timeHelper(event,false) }
 
 void timeHelper(event,Boolean recovery){
@@ -2853,7 +2858,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	tmpRtD= getTemporaryRunTimeData(startTime)
 	Map msg=timer(sEPS,tmpRtD,iN1) ?: ([:] as LinkedHashMap)
 	String evntName; evntName=sMs(event,sNM)
-	String evntVal=String.valueOf(event[sVAL])
+	String evntVal; evntVal=String.valueOf(event[sVAL])
 	Long eventDelay=startTime-lMt(event)
 	Integer lg=iMs(tmpRtD,sLOGNG)
 	if(lg!=iZ){
@@ -2955,11 +2960,11 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		if(tmpRtD[sSTACCESS]==null){
 			Long stStart,b
 			stStart=wnow()
-			b=(Long)gtSt(sNSCH) // forcing state accesses
-			List a=(List)gtSt(sSCHS)
-			Map pEvt=(Map)gtSt(sLEVT)
-			Long stEnd=wnow()
-			stAccess=stEnd-stStart
+			Map mst=gtState()
+			b=lMs(mst,sNSCH) // forcing state accesses
+			//List a=liMs(mst,sSCHS)
+			//Map pEvt=mMs(mst,sLEVT)
+			stAccess=elapseT(stStart)
 		}else stAccess=lMs(tmpRtD,sSTACCESS)
 	}
 
@@ -2971,16 +2976,16 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	checkVersion(r9)
 
 	Long theend=wnow()
+	Long t0=elapseT(startTime,theend)
 	Long le=lMs(r9,sLSEND)
-	Long t0=theend-startTime
-	Long t1=le-lMs(r9,sLSTART)
+	Long t1=elapseT(lMs(r9,sLSTART),le)
 	Long t2=lMs(r9,sGENIN)
-	Long t3=lMs(r9,sPEND)-lMs(r9,sPSTART)
+	Long t3=elapseT(lMs(r9,sPSTART),lMs(r9,sPEND))
 	r9[sCURS]=[(sI):t0.toInteger(),(sL):t1.toInteger(),(sR):t2.toInteger(),(sP):t3.toInteger(),(sS):stAccess.toInteger()] as LinkedHashMap
 	if(lg>i1){
 		Long missing=t0-t1-t2-stAccess
-		Long t4=le-startTime
-		Long t5=theend-le
+		Long t4=elapseT(startTime,le)
+		Long t5=elapseT(le,theend)
 		String Msg= "Runtime (${r9.size()} keys) initialized ".toString()
 		String adMsg= lg>i2 || eric() ? "${t0} LockT > ${t1}ms > r9T > ${t2}ms > pistonT > ${t3}ms (first state access ${stAccess} m:${missing} $t4 $t5)".toString() : sBLK
 		if(lg>i2)debug Msg+adMsg+" (${sHVER})".toString(),r9
@@ -4523,7 +4528,7 @@ private Boolean executeTask(Map r9,List devices,Map statement,Map task,Boolean a
 
 	def virtualDevice=devices.size()!=iZ ? null:gtLocation()
 	for(device in (virtualDevice!=null ? [virtualDevice]:devices)){
-		if(virtualDevice==null && wdeviceHascommand(device,command) && !voverride){
+		if(virtualDevice==null && wdeviceHascommand(device as DeviceWrapper,command) && !voverride){
 			if(command in LWCMDS){ // device commands with added parameters by webCoRE (have cmd_ wrapper (11))
 				Boolean doL= isInf(r9) && !isTrc(r9)
 				Map msg; msg=null
@@ -5662,7 +5667,7 @@ private static Long vcmd_clearTile(Map r9,device,List prms){
 private Long vcmd_setLocationMode(Map r9,device,List prms){
 	String mIdOrNm=sLi(prms,iZ)
 	Map mode=fndMode(r9,mIdOrNm)
-	if(mode) location.setMode(sMs(mode,sNM))
+	if(mode) gtLocation().setMode(sMs(mode,sNM))
 	else error "Error setting location mode. Mode '$mIdOrNm' does not exist.",r9
 	return lZ
 }
@@ -5790,7 +5795,7 @@ private static void fill_cls(){
 		]
 }
 
-private void smart_toggle(Map r9,device,Boolean prob=null){
+private void smart_toggle(Map r9,DeviceWrapper device,Boolean prob=null){
 	Boolean fnd; fnd=false
 	String a0,c; c= 'toggle'
 	if(wdeviceHascommand(device,c)){
@@ -6824,7 +6829,7 @@ private Boolean readFile(Map r9,List prms,Boolean data){
 	if(data)readDataFLD[pNm]=sBLK else readTmpFLD[pNm]=sBLK
 
 	Boolean res; res=false
-	Boolean fwOk= ((String)location.hub.firmwareVersionString >= minFwVersion)
+	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	try{
 		if(fwOk){
 			readTmpBFLD[pNm]=null
@@ -6839,7 +6844,7 @@ private Boolean readFile(Map r9,List prms,Boolean data){
 		}else{
 			String cookie; cookie=sNL
 			if(user && pass) cookie=securityLogin(user,pass).cookie
-			String uri= "http://${location.hub.localIP}:8080/local/${name}".toString()
+			String uri= "http://${gtLocation().hub.localIP}:8080/local/${name}".toString()
 
 			Map params=[
 				uri: uri,
@@ -6921,14 +6926,14 @@ private Long vcmd_appendFile(Map r9,device,List prms){
 
 private Boolean fileExists(Map r9,String name){
 	Boolean res; res=false
-	Boolean fwOk= ((String)location.hub.firmwareVersionString >= minFwVersion)
+	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	String pNm=sMs(r9,snId)
 	try{
 		if(fwOk){
 			readTmpBFLD[pNm]= (byte[])downloadHubFile(name)
 			res= true
 		}else{
-			String uri="http://${location.hub.localIP}:8080/local/${name}".toString()
+			String uri="http://${gtLocation().hub.localIP}:8080/local/${name}".toString()
 			Map params=[uri: uri]
 
 			httpGet(params){ resp ->
@@ -6951,7 +6956,7 @@ private Boolean writeFile(Map r9,List prms){
 	//String pass=sLi(prms,i3)
 
 	String pNm=sMs(r9,snId)
-	Boolean fwOk= ((String)location.hub.firmwareVersionString >= minFwVersion)
+	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	Boolean res; res=false
 	try{
 		if(fwOk){
@@ -7007,7 +7012,7 @@ private Long vcmd_writeFile(Map r9,device,List prms){
 private Boolean deleteFile(Map r9,List prms){
 	String fName= sLi(prms,iZ)
 
-	Boolean fwOk= ((String)location.hub.firmwareVersionString >= minFwVersion)
+	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	Boolean res; res=false
 	try{
 		if(fwOk){
@@ -8182,7 +8187,7 @@ private List<Map> listPreviousStates(Map r9,device,String attr,Long threshold,Bo
 		myDetail r9,mySt+s1,i1
 	}
 	List<Map> res=[]
-	List events=((List)device.events([all: true,max: i100])).findAll{ it -> (String)it.getName()==attr}
+	List<Event> events=((List<Event>)device.events([all: true,max: i100])).findAll{ it -> (String)it.getName()==attr}
 	//if we need to exclude last event we start at the second event as the first one is the event that triggered execution.
 	// The attribute's value has to be different from the current one to qualify for quiet
 	Integer sz=events.size()
@@ -8192,7 +8197,7 @@ private List<Map> listPreviousStates(Map r9,device,String attr,Long threshold,Bo
 		Long thresholdTime=elapseT(threshold)
 		Long endTime; endTime=wnow()
 		Integer i
-		def curEvt
+		Event curEvt
 		for(i=iZ; i<sz; i++){
 			curEvt=events[i]
 			Long startTime=((Date)curEvt[sDATE]).getTime()
@@ -8204,7 +8209,7 @@ private List<Map> listPreviousStates(Map r9,device,String attr,Long threshold,Bo
 		}
 	}
 	if(res.size()==iZ){
-		def currentState=device.currentState(attr,true)
+		State currentState=(State)device.currentState(attr,true)
 		if(currentState){
 			Long startTime=((Date)currentState.getDate()).getTime()
 			res.push([(sVAL):currentState[sVAL],(s):startTime,(sDURATION):elapseT(startTime)])
@@ -9468,20 +9473,24 @@ private List<String> expandDeviceList(Map r9,List<String> devs,Boolean localVars
 private getDevice(Map r9,String idOrName, Boolean rptMissing=true){
 	if(idOrName in (List<String>)r9[sALLLOC])return gtLocation()
 	if(!idOrName)return null
-	String d=sDEVS
-	r9[d]=r9[d] ?:[:]
-	Map<String,Object> dM=mMs(r9,d)
-	def t0=dM[idOrName]
-	def device
+
+	String d=sDEVS  // per Piston devices in use
+	r9[d]=r9[d] ?:[:] as Map<String,DeviceWrapper>
+
+	Map<String,DeviceWrapper> dM= (Map<String,DeviceWrapper>)r9[d]
+	DeviceWrapper t0=dM[idOrName]
+
+	DeviceWrapper device
 	if(t0!=null){
 		device=t0
 	}else{
-		Map.Entry<String,Object> found=dM.find{Map.Entry<String,Object> it -> gtLbl(it.value)==idOrName }
+		Map.Entry<String,DeviceWrapper> found=dM.find{Map.Entry<String,DeviceWrapper> it -> gtLbl(it.value)==idOrName }
 		if(found!=null){
 			device=found.value
 			dM[idOrName]=device // cache label as alias so future lookups are O(1)
 		}
 	}
+
 	if(device==null){
 		String aD=sALLDEVS
 		if(r9[aD]==null){
@@ -9490,11 +9499,14 @@ private getDevice(Map r9,String idOrName, Boolean rptMissing=true){
 			if(isDbg(r9))debug msg,r9
 		}
 		if(r9[aD]!=null){
-			Map.Entry<String,Object> deviceEnt=mMs(r9,aD).find{ Map.Entry<String,Object> it -> idOrName==(String)it.key || idOrName==gtLbl(it.value) }
+			Map<String, DeviceWrapper> dlist = (Map<String,DeviceWrapper>)r9[aD]
+			//Map.Entry<String,Object> deviceEnt=mMs(r9,aD).find{ Map.Entry<String,Object> it -> idOrName==(String)it.key || idOrName==gtLbl(it.value) }
+			Map.Entry<String,DeviceWrapper> deviceEnt=dlist.find{  Map.Entry<String,DeviceWrapper> it ->
+				idOrName==it.key || idOrName==gtLbl(it.value) }
 			if(deviceEnt!=null){
 				device=deviceEnt.value
 				r9[sUPDDEVS]=true
-				r9[d][(String)deviceEnt.key]=device
+				r9[d][deviceEnt.key]=device
 			}
 		}
 		if(device==null && rptMissing){
@@ -11951,7 +11963,7 @@ private Map func_age(Map r9,List<Map> prms){
 	if(sMt(prm)==sDEV && sMa(prm) && liMv(prm).size()){
 		def device=getDevice(r9,sLi(liMv(prm),iZ))
 		if(device!=null){
-			def dstate=device.currentState(sMa(prm),true)
+			State dstate=(State)device.currentState(sMa(prm),true)
 			if(dstate){
 				Long res=elapseT(((Date)dstate.getDate()).getTime())
 				return rtnMap(sLONG,res)
@@ -11969,7 +11981,7 @@ private Map func_previousage(Map r9,List<Map> prms){
 	if(sMt(prm)==sDEV && sMa(prm) && liMv(prm).size()){
 		def device=getDevice(r9,sLi(liMv(prm),iZ))
 		if(device!=null && !isDeviceLocation(device)){
-			List states=device.statesSince(sMa(prm),new Date(elapseT(604500000L)),[max:i5])
+			List<State> states=(List<State>)device.statesSince(sMa(prm),new Date(elapseT(604500000L)),[max:i5])
 			Integer sz=states.size()
 			if(sz>i1){
 				def newValue=states[iZ].getValue()
@@ -11998,7 +12010,7 @@ private Map func_previousvalue(Map r9,List<Map> prms){
 		def device=getDevice(r9,sLi(liMv(prm),iZ))
 		Map attribute=devAttrT(sMa(prm),device)
 		if(device!=null && !isDeviceLocation(device)){
-			List states=device.statesSince(sMa(prm),new Date(elapseT(604500000L)),[max:i5])
+			List<State> states=(List<State>)device.statesSince(sMa(prm),new Date(elapseT(604500000L)),[max:i5])
 			Integer sz=states.size()
 			if(sz>i1){
 				def newValue=states[iZ].getValue()
@@ -12888,8 +12900,9 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 	return value
 }
 
+/** end - start */
 @CompileStatic
-private Long elapseT(Long t,Long n=wnow()){ return Math.round(d1*n-t) }
+private Long elapseT(Long start,Long end=wnow()){ return end-start }
 
 @CompileStatic
 private ZonedDateTime utcToLocalDate(Map r9,dateOrTimeOrString=null){
@@ -14405,7 +14418,7 @@ private Boolean wpausePiston(String pistonId,String selfId){ return (Boolean)par
 private Boolean wresumePiston(String pistonId,String selfId){ return (Boolean)parent.resumePiston(pistonId,selfId) }
 private Boolean wisPisPaused(String pistonId){ return (Boolean)parent.isPisPaused(pistonId) }
 private Map wgetGStore(){ return (Map)parent.getGStore() }
-private Map wlistAvailableDevices(Boolean raw){ return parent.listAvailableDevices(raw) }
+private Map<String, DeviceWrapper> wlistAvailableDevices(Boolean raw){ return (Map<String,DeviceWrapper>)parent.listAvailableDevices(raw) }
 private Map wgetWData(){ return [:]+(Map)parent.getWData() }
 private Map wlistAvailableVariables(){ return (Map)parent.listAvailableVariables() }
 
@@ -14520,28 +14533,29 @@ private void assignAS(String nm,v){ atomicState.put(nm,v) }
 
 private Map<String,Object> gtState(){ return (Map<String,Object>)state }
 
-private gtLocation(){ return location }
-private Map<String,Object> cvtLoc(){ cvtDev(location) }
-private String gtLMode(){ return (String)location.getMode() }
+Location gtLocation(){ return (Location)getLocation() }
+private Map<String,Object> cvtLoc(){ cvtDev(gtLocation()) }
+private String gtLMode(){ return (String)gtLocation().getCurrentMode().getName() }
 private Map fndMode(Map r9,String m){
-	def mode= ((List)location.getModes())?.find{ it-> hashId(r9,(Long)it.getId())==m || (String)it.getName()==m }
+	def mode= ((List)gtLocation().getModes())?.find{ it-> hashId(r9,(Long)it.getId())==m || (String)it.getName()==m }
 	return mode ? [(sID): (Long)mode.getId(), (sNM): (String)mode.getName()] :null
 }
 private Map<String,Object> gtCurrentMode(){
-	def a=location.getCurrentMode()
-	if(a)return [(sID):(Long)a.getId(),(sNM): (String)a.getName()]
+	def mode=gtLocation().getCurrentMode()
+	if(mode)return [(sID):(Long)mode.getId(),(sNM): (String)mode.getName()]
 	return null
 }
-private String gtLtScale(){ return (String)location.getTemperatureScale() }
-private String gtLname(){ return (String)location.getName() }
+private String gtLtScale(){ return (String)gtLocation().getTemperatureScale() }
+private String gtLname(){ return (String)gtLocation().getName() }
 
-private String gtLzip(){ return (String)location.zipCode }
-private String gtLlat(){ return ((BigDecimal)location.latitude).toString() }
-private String gtLlong(){ return ((BigDecimal)location.longitude).toString() }
+private String gtLzip(){ return (String)gtLocation().zipCode }
+private String gtLlat(){ return ((BigDecimal)gtLocation().latitude).toString() }
+private String gtLlong(){ return ((BigDecimal)gtLocation().longitude).toString() }
 
-private String gtLhsmStatus(){ return (String)location.hsmStatus }
+private String gtLhsmStatus(){ return (String)gtLocation().hsmStatus }
 
 private String gtLbl(d){ return "${d?.label ?: d?.name ?: gtLname()}".toString() }
+
 //hubitat device ids can be the same as the location id
 private Boolean isDeviceLocation(d){
 	if(dvStr(d)==dvStr(gtLocation())){
@@ -14551,7 +14565,7 @@ private Boolean isDeviceLocation(d){
 	return false
 }
 
-Boolean wdeviceHascommand(device, String cmd){ return (Boolean)device?.hasCommand(cmd) }
+Boolean wdeviceHascommand(DeviceWrapper device, String cmd){ return (Boolean)device?.hasCommand(cmd) }
 
 private static String dvStr(d){ return d.id.toString() }
 private static String hashD(Map r9,d){ return hashId2(d.id,sMs(r9,spId)) }
