@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update July 6, 2026 for Hubitat
+ * Last update August 8, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -10309,14 +10309,13 @@ private void updateVariable(Map r9,String n, Map variable, Boolean clear=false){
 	else vars[n]=oMv(variable)
 	mb()
 
-	if(t0!=null){
-		// Cache is warm: update only the in-memory cache; the state write at execution end persists it.
+	// Cache is warm: update the in-memory cache; first
+	if(t0!=null)
 		updateCacheFld(r9,sVARS,vars,sV,false)
-	} else {
-		// Cache is cold (recovery/first-run path): must write through to state immediately.
-		if(isPep(r9))assignAS(sVARS,vars)
-		else assignSt(sVARS,vars)
-	}
+
+	// update the Hubitat persistence always
+	if(isPep(r9))assignAS(sVARS,vars) // atomicState is immiediate for other readers (DB access on Hubitat)
+	else assignSt(sVARS,vars)		  // state will be written back at end of execution (Hubitat behavior)
 }
 
 @CompileStatic

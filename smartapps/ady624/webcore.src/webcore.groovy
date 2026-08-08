@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update July 7, 2026 for Hubitat
+ * Last update August 8, 2026 for Hubitat
  */
 
 /*
@@ -28,7 +28,7 @@
  * near the bottom of webcore-piston.groovy.
  *
  * Calls this app makes to a piston child:
- *   piston.get(minimal)                       - fetch full/minimal runtime data for the dashboard
+ *   piston.get(minimal)                       - fetch piston full/minimal & runtime data for the dashboard
  *   piston.setup(data, chunks)                - save an uploaded/edited piston definition
  *   piston.pausePiston() / piston.resume()    - pause/resume a piston
  *   piston.deletePiston()                     - piston self-cleanup before app.deleteChildApp()
@@ -38,7 +38,7 @@
  *   piston.execute(data, src)                 - run a piston (external trigger or executePiston())
  *   piston.config(data)                       - initialize a newly created piston
  *   piston.test()/.clickTile()/.setBin()/.setCategory()/.updModified()/.setLoggingLevel()/.clearLogs()
- *                                              - misc dashboard-driven ops (dynamic dispatch via common_Simple)
+ *                                             - misc dashboard-driven ops (dynamic dispatch via common_Simple)
  *   chld.clearLogsQ()/.clearAllQ()/.clearCache() - periodic/bulk piston cache cleanup (clearChldCaches)
  *   chld.curPState()                          - fetch cached piston metadata (gtMeta fallback)
  *   chld.killSwitchDisable()                  - notify all pistons the global kill switch turned on
@@ -49,12 +49,12 @@
  *
  * Calls a piston child makes to this app (parent.xxx()):
  *   parent.isInstalled() / .getWikiUrl() / .getDashboardUrl() / .getWCendpoints()
- *                                              - install state, links, and endpoint config (piston prefs page)
+ *                                             - install state, links, and endpoint config (piston prefs page)
  *   parent.generatePistonName()               - default name for a new piston
  *   parent.pistonUninstalled(id)              - piston deleted outside the dashboard API (e.g. HE Apps list);
  *                                                invalidates the parent's piston-list/metadata/base-result caches
  *   parent.readFuelStream()/.writeFuelStream()/.clearFuelStream()/.writeToFuelStream()
- *                                              - fuel stream storage passthrough
+ *                                             - fuel stream storage passthrough
  *   parent.getChildAttributes()/.getChildComparisons()/.getChildVirtCommands()/.getChildVirtDevices()/
  *   .getChildCommands()/.getColors()          - shared reference-data caches, loaded once and reused by all pistons
  *   parent.gtPdata()                          - shared piston state map (enabled/disabled, settings, lifx, etc.)
@@ -181,7 +181,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - July 7, 2026'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - August 8, 2026'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -3609,7 +3609,7 @@ Map<String,Object> listAvailableDevices(Boolean raw=false, Boolean batch=true, I
 		presenceDevices=wgetChildDevices().findAll{ (String)it.name==n }
 		if(presenceDevices && presenceDevices.size()){
 			if(raw){
-				rawResult << presenceDevices.collectEntries{ ChildDeviceWrapper dev -> [(hashId(dev.id)): dev]}
+				rawResult << (presenceDevices.collectEntries { ChildDeviceWrapper dev -> [(hashId(dev.id)): dev] } as Map<String, DeviceWrapper>)
 			}else{
 				result.devices << presenceDevices.collectEntries{ ChildDeviceWrapper dev ->
 					[(hashId(dev.id)): dev]}.collectEntries{ id, dev ->
