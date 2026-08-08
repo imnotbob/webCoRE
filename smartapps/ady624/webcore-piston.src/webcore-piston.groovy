@@ -3560,11 +3560,13 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 		releaseTheLock(myId)
 	}
 	if(myPep){
+		assignAS(sVARS,mMs(r9,sVARS))
 		assignAS(sCACHE,mMs(r9,sCACHE))
 		assignAS(sSTORE,mMs(r9,sSTORE))
 		assignAS(sST,[:]+mMs(r9,sST))
 		if(!bIs(r9,sDID3OR5)) assignAS(sTRC,mMs(r9,sTRC))
 	}else{
+		assignSt(sVARS,mMs(r9,sVARS))
 		assignSt(sCACHE,mMs(r9,sCACHE))
 		assignSt(sSTORE,mMs(r9,sSTORE))
 		assignSt(sST,[:]+mMs(r9,sST))
@@ -10310,7 +10312,7 @@ private void updateVariable(Map r9,String n, Map variable, Boolean clear=false){
 	mb()
 
 	if(t0!=null){
-		// Cache is warm: update only the in-memory cache; the state write at execution end persists it.
+		// Cache is warm: update the in-memory cache; finalizeEvent() persists sVARS to durable state at execution end.
 		updateCacheFld(r9,sVARS,vars,sV,false)
 	} else {
 		// Cache is cold (recovery/first-run path): must write through to state immediately.
