@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update August 8, 2026 for Hubitat
+ * Last update October 13, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -53,6 +53,9 @@ import java.time.*
 //import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.concurrent.Semaphore
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 import com.hubitat.app.DeviceWrapper
 import com.hubitat.hub.domain.Location
@@ -478,7 +481,6 @@ static Boolean eric1(){ return false }
 @Field static final String sEND='end'
 
 @Field static final String sTSLF='theSerialLockFLD'
-//@Field static final String sTCL='cacheLock'
 @Field static final String sTGBL='theGlobal'
 @Field static final String sLCK1='lockOrQueue1'
 @Field static final String sLCK2='lockOrQueue2'
@@ -843,8 +845,21 @@ def pageClear(){
  * @param most data + clear trace and stats
  * @param all all of above + clear local variables
  * @param reset data + reset log/stats settings
+ * @param holdsLease caller (handleEvents) holds this piston's execution lease
  */
-Map clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean all=false,Boolean reset=false){
+Map clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean all=false,Boolean reset=false,Boolean holdsLease=false){
+	// clear all from outside a run (IDE page, delete): wait for a running execution to finish, then
+	// discard its queued events. From inside a run (holdsLease) leave the lease and queue alone.
+	Boolean ext=all && !holdsLease
+	Long lS= ext ? acquireLeaseExt('clear1') : lZ
+	try{
+		return clear1I(ccache,some,most,all,reset)
+	}finally{
+		if(ext)releaseLeaseExt(lS,true)
+	}
+}
+
+private Map clear1I(Boolean ccache,Boolean some,Boolean most,Boolean all,Boolean reset){
 	String meth
 	meth='clear1'
 	if(some||all)state.put(sLOGS,[])
@@ -852,13 +867,8 @@ Map clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean all
 	if(reset){wappRemoveSetting(sMLOGS); wappRemoveSetting(sMSTATS); wappRemoveSetting(sLOGHE) }
 	cleanState()
 	LinkedHashMap tRtData, r9
-	r9= null
 	if(all){
 		meth+=' all'
-
-		tRtData= getTemporaryRunTimeData()
-		String pNm=sMs(tRtData,snId)
-		tRtData=null
 
 		state.put(sCACHE,[:])
 		stNeedUpdate()
@@ -866,30 +876,15 @@ Map clear1(Boolean ccache=false,Boolean some=true,Boolean most=false,Boolean all
 		state.put(sVARS,[:])
 		state.put(sSTORE,[:])
 		state.put(sPAUSES,lZ)
-
-		getTheLock(pNm,meth)
-		theSemaphoresVFLD.put(pNm,lZ)
-		theSemaphoresVFLD=theSemaphoresVFLD
-		theQueuesVFLD.put(pNm,[])
-		theQueuesVFLD=theQueuesVFLD // forces volatile cache flush
-		releaseTheLock(pNm)
-
 	}
 	clearMyCache(meth)
 	tRtData= getTemporaryRunTimeData()
+	r9= tRtData
 	if(all){
 		clearReadFLDs(tRtData)
-		Boolean act=isAct(tRtData)
-		Boolean dis=!isEnbl(tRtData)
-		if(act && !dis){
-			r9= getRunTimeData(tRtData,null,true,true,true) //reinitializes cache variables; caches piston
-//		}else{
-//			r9= getRunTimeData(tRtData,null,false,true,true)
-		}
-//	}else{
-//		r9= getRunTimeData(tRtData,null,false,true,true)
+		if(isAct(tRtData) && isEnbl(tRtData))
+			r9= getRunTimeData(tRtData,null,true,true,true) ?: tRtData //reinitializes cache variables; caches piston
 	}
-	if(r9==null) r9= tRtData
 	Map nRtd=shortRtd(r9)
 	tRtData=null
 	r9=null
@@ -1053,25 +1048,12 @@ def pageDumpPCache(){
 }
 
 def pageDumpHelper(Integer i,String nm,String desc){
-	LinkedHashMap pis,r9
+	// i: 0 full, 1 memory cached, 2 returned to IDE cleaned up
+	LinkedHashMap r9
 	r9= getRunTimeData()
-	Boolean shorten,inMem,useCache
-	shorten=true; inMem=false; useCache=false
-	switch(i){
-		case iZ: // full
-			shorten=false
-			break
-		case i1: // cached
-			inMem=true; useCache=true
-			break
-		case i2: // returned to iDE cleaned up
-			break
-	}
-	pis=recreatePiston(shorten,inMem,useCache)
-	r9[sPISTN]=pis
+	Boolean inMem=i==i1
+	r9[sPISTN]=recreatePiston(i!=iZ,inMem,inMem)
 	subscribeAll(r9,false,inMem)
-
-	pis=null
 	String message=getMapDescStr(mMs(r9,sPISTN))
 	r9=null
 	return dynamicPage((sNM):nm,(sTIT):sBLK,uninstall:false){
@@ -1120,14 +1102,17 @@ void uninstalled(){
 }
 
 void initialize(){
-	svSunTFLD=[:]; mb()
+	svSunTFLD.clear()
 	Map mst=gtState()
 	String tt1=(String)gtSetting(sLOGNG)
 	Integer tt2=iMs(mst,sLOGNG) ?: iZ
 	String tt3=tt2.toString()
 	if(tt1==sNL) setLoggingLevel(tt2 ? tt3:s0,false)
 	else if(tt1!=tt3) setLoggingLevel(tt1,false)
-	if(bIs(mst,sACT)) resumeP()
+	// Resume through the serialized event path: runs now if the piston is idle, or is queued and run
+	// right after the current execution. Waiting for the lease here (resumeP()) would stall for
+	// lEXTLEASEW when that execution itself caused this updated() (e.g. via the parent).
+	if(bIs(mst,sACT)) commonHandle(sRESUME)
 	else clearMyCache('initialize')
 }
 
@@ -1249,8 +1234,11 @@ private static String decodeEmoji(String value){
 	}
 }
 
-@Field static Map<String,Map> thePistonCacheFLD=[:]
-@Field static volatile Map<String,List<String>> anyOfCacheFLD=[:]
+@Field static final ConcurrentHashMap<String,Map> thePistonCacheFLD=new ConcurrentHashMap<String,Map>()
+@Field static volatile ConcurrentHashMap<String,List<String>> anyOfCacheFLD=new ConcurrentHashMap<String,List<String>>()
+// latest build number per piston, published in memory by setup() as soon as it is known; a cached
+// piston tagged with a different build (built from settings read before the save) is ignored
+@Field static final ConcurrentHashMap<String,Integer> pistonBldFLD=new ConcurrentHashMap<String,Integer>()
 
 /** clear piston code cache */
 private void clearMyPiston(String meth=sNL){
@@ -1287,9 +1275,14 @@ private LinkedHashMap recreatePiston(Boolean shorten=false,Boolean inMem=false,B
 		if(pData==null || pData[c]==null){
 			pData=[(c):iZ,(sPIS):null]
 			thePistonCacheFLD[pNm]=pData
-			mb()
 		}
-		if(pData[sPIS]!=null)return (LinkedHashMap)(pData[sPIS]+[(sCACHED):true])
+		if(pData[sPIS]!=null){
+			Integer want=pistonBldFLD[pNm]
+			if(want==null || pData[sBLD]==want)return (LinkedHashMap)(pData[sPIS]+[(sCACHED):true])
+			// cached from a build older than the last setup(); drop it and rebuild from settings
+			thePistonCacheFLD[pNm]=[(c):iZ,(sPIS):null]
+			if(eric())debug "dropping stale piston-code-cache build ${pData[sBLD]} want ${want}",null
+		}
 	}
 
 	if(eric())debug "recreating piston shorten: $shorten inMem: $inMem useCache: $useCache",null
@@ -1304,15 +1297,7 @@ private LinkedHashMap recreatePiston(Boolean shorten=false,Boolean inMem=false,B
 	}
 	if(sdata!=sBLK){
 		LinkedHashMap data=(LinkedHashMap)new JsonSlurper().parseText(decodeEmoji(new String(sdata.decodeBase64(),sUTF8)))
-		LinkedHashMap piston=[
-			(sO): data[sO] ?: [:],
-			(sR): data[sR] ?: [],
-			(sRN): !!data[sRN],
-			(sROP): data[sROP] ?: sAND,
-			(sS): data[sS] ?: [],
-			(sV): data[sV] ?: [],
-			(sZ): data[sZ] ?: sBLK
-		]
+		LinkedHashMap piston=pistonFrom(data)
 		assignSt(sPSTNZ,sMs(piston,sZ))
 		clearMsetIds(piston)
 		msetIds(shorten,inMem,piston)
@@ -1326,6 +1311,17 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 		doLog(sERROR,'setup: no data')
 		return [:]
 	}
+	// wait for a running execution to finish so the piston is not rewritten underneath it;
+	// events queued meanwhile run afterwards with the new code
+	Long lS=acquireLeaseExt('setup')
+	try{
+		return setupI(data,chunks)
+	}finally{
+		releaseLeaseExt(lS)
+	}
+}
+
+private Map setupI(LinkedHashMap data,Map<String,String>chunks){
 	String meth='setup'
 	clearMyCache(meth)
 
@@ -1334,15 +1330,8 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 
 	assignSt(sMODFD,wnow())
 	assignSt(sBLD,gtSt(sBLD)!=null ? iMs(gtState(),sBLD)+i1:i1)
-	LinkedHashMap piston=[
-		(sO): data[sO] ?: [:],
-		(sR): data[sR] ?: [],
-		(sRN): !!data[sRN],
-		(sROP): data[sROP] ?: sAND,
-		(sS): data[sS] ?: [],
-		(sV): data[sV] ?: [],
-		(sZ): data[sZ] ?: sBLK
-	]
+	pistonBldFLD[mSmaNm]=iMs(gtState(),sBLD)
+	LinkedHashMap piston=pistonFrom(data)
 	clearMyPiston(meth)
 	clearMsetIds(piston)
 	msetIds(false,false,piston)
@@ -1376,10 +1365,23 @@ Map setup(LinkedHashMap data,Map<String,String>chunks){
 	Map mst; mst=gtState()
 	Integer i= iMs(mst,sBLD)
 	Boolean b= bIs(mst,sACT)
-	if(i==i1 || b)r9= resumeP(piston,false)
+	if(i==i1 || b)r9= resumeP(piston,false,true) // setup holds the lease
 	else clearMyCache(meth)
 	mst=gtState()
 	return [(sACT):b,(sBLD):i,(sMODFD):lMs(mst,sMODFD),(sST):mMs(mst,sST),rtData:r9]
+}
+
+/** piston code fields from IDE / settings data */
+private static LinkedHashMap pistonFrom(Map data){
+	return [
+		(sO): data[sO] ?: [:],
+		(sR): data[sR] ?: [],
+		(sRN): !!data[sRN],
+		(sROP): data[sROP] ?: sAND,
+		(sS): data[sS] ?: [],
+		(sV): data[sV] ?: [],
+		(sZ): data[sZ] ?: sBLK
+	] as LinkedHashMap
 }
 
 @CompileStatic
@@ -1418,50 +1420,17 @@ private static void fill_STMT(){
 private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Map<String,Integer> existingIds=[:],List<Map> requiringIds=[],Integer level=iZ){
 	String nodeT=sMt(node)
 	Integer maxId; maxId=mId
-	//Boolean lg= eric() && settings[sLOGNG]?.toInteger()>i2
 	if(nodeT in ListCmd){
-		Integer id
-		id=iMs(node,sDLR)?:iZ
-		String sid
-		sid=id.toString()
-		if(id==iZ || existingIds[sid]!=null) requiringIds.push(node)
-		else{
-			maxId=Math.max(maxId,id)
-			existingIds[sid]=id
-		}
+		maxId=regId(node,maxId,existingIds,requiringIds)
 		if(nodeT==sIF && node[sEI]){
 			liMs(node,sEI).removeAll{ Map it -> !it.c && !it.s } // modifies code
-			for(Map elseIf in liMs(node,sEI)){
-				id= iMs(elseIf,sDLR)?:iZ
-				sid=id.toString()
-				if(id==iZ || existingIds[sid]!=null) requiringIds.push(elseIf)
-				else{
-					maxId=Math.max(maxId,id)
-					existingIds[sid]=id
-				}
-			}
+			for(Map elseIf in liMs(node,sEI)) maxId=regId(elseIf,maxId,existingIds,requiringIds)
 		}
 		if(nodeT==sSWITCH && node[sCS]){
-			for(Map _case in liMs(node,sCS)){
-				id= iMs(_case,sDLR)?:iZ
-				sid=id.toString()
-				if(id==iZ || existingIds[sid]!=null) requiringIds.push(_case)
-				else{
-					maxId=Math.max(maxId,id)
-					existingIds[sid]=id
-				}
-			}
+			for(Map _case in liMs(node,sCS)) maxId=regId(_case,maxId,existingIds,requiringIds)
 		}
 		if(nodeT==sACTION && node[sK]){
-			for(Map task in liMs(node,sK)){
-				id=iMs(task,sDLR)?:iZ
-				sid=id.toString()
-				if(id==iZ || existingIds[sid]!=null) requiringIds.push(task)
-				else{
-					maxId=Math.max(maxId,id)
-					existingIds[sid]=id
-				}
-			}
+			for(Map task in liMs(node,sK)) maxId=regId(task,maxId,existingIds,requiringIds)
 		}
 	}
 	for(list in node.findAll{ it.value instanceof List }){
@@ -1477,6 +1446,16 @@ private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Ma
 		if(shorten)cleanCode(node,inMem)
 	}
 	return maxId
+}
+
+/** record a node's statement id, or queue it for a new id if missing or duplicate; returns the new maxId */
+@CompileStatic
+private static Integer regId(Map node,Integer maxId,Map<String,Integer> existingIds,List<Map> requiringIds){
+	Integer id=iMs(node,sDLR)?:iZ
+	String sid=id.toString()
+	if(id==iZ || existingIds[sid]!=null){ requiringIds.push(node); return maxId }
+	existingIds[sid]=id
+	return Math.max(maxId,id)
 }
 
 @Field static List<String> ListAL=[]
@@ -1500,7 +1479,6 @@ private Integer msetIds(Boolean shorten,Boolean inMem,Map node,Integer mId=iZ,Ma
 @Field static List<String> ListORAND
 @Field static List<String> ListANYALL
 @Field static List<String> ListSLVLSIFLVL
-@Field static List<String> ListI
 
 @Field static final String sAVG='avg'
 @Field static final String sZC='zc'
@@ -1536,14 +1514,13 @@ private static void fill_ListAL(){
 		ListDATEDTIME=[sDATE,sDTIME]
 		ListSTRDYN=[sSTR,sDYN]
 		ListEC=[sE,sC]
-		ListC3=[sD,sR,sCS,sFS,sTS,sE,sEI,sS,sK,sP,sV,sC]
+		ListC3=[sD,sR,sCS,sFS,sTS,sE,sEI,sS,sK,sP,sV,sC,sI] // sI expression items last
 		ListC4=[sWD,sRO2,sTO,sTO2]
 		ListBC=[sB,sC]
 		ListBP=[sB,sP]
 		ListORAND=[sOR,sAND]
 		ListANYALL=[sANY,sALL]
 		ListSLVLSIFLVL=[sSTLVL,sSTIFLVL]
-		ListI=[sI]
 	}
 }
 
@@ -1569,13 +1546,8 @@ private void cleanCode(Map i,Boolean inMem){
 		// task parameters (sP) with 'Nothing selected'
 		if(sMs(item,sG) in ListAVANY && sMs(item,sF)==sL && item[sVT]!=null){
 			if(item[sX]!=null){ item.remove(sX); item.remove(sXI)}
-			if(item[sE]!=null) item.remove(sE)
-			if(item[sC]!=null) item.remove(sC)
-			if(item[sV]!=null) item.remove(sV)
-			if(item[sS]!=null) item.remove(sS)
-			if(item[sU]!=null) item.remove(sU)
 			if(item[sEXP]) item.remove(sEXP)
-			if(item[sA]!=null) item.remove(sA)
+			for(String k in [sE,sC,sV,sS,sU,sA]) item.remove(k)
 
 			// task parameters (sP) without types, but have devices
 			if(item[sD] instanceof List && item[sD]) item[sD]=[]
@@ -1605,12 +1577,8 @@ private void cleanCode(Map i,Boolean inMem){
 		if(ty in ListC2 && item[sD] instanceof List) item.remove(sD)
 		if(!(ty in ListEC) && item[sEXP]) item.remove(sEXP) // evaluateOperand
 		if(ty!=sX && item[sX]!=null){ item.remove(sX); item.remove(sXI)}
-		if(ty!=sE && item[sE]!=null) item.remove(sE)
-		if(ty!=sC && item[sC]!=null) item.remove(sC)
-		if(ty!=sV && oMv(item)!=null) item.remove(sV)
-		if(ty!=sS && item[sS]!=null) item.remove(sS)
-		if(ty!=sU && item[sU]!=null) item.remove(sU)
-		if(ty!=sP && item[sA]!=null) item.remove(sA)
+		for(String k in [sE,sC,sV,sS,sU]) if(ty!=k) item.remove(k)
+		if(ty!=sP) item.remove(sA)
 	}
 	if(inMem && ty==sEXPR && item[sI] && liMs(item,sI).size()==i1){ // simplify un-needed nesting
 		List<Map> bb=liMs(item,sI)
@@ -1697,31 +1665,18 @@ private void cleanCode(Map i,Boolean inMem){
 	}
 
 	for(String t in ListC3){
-		if(item.containsKey(t) && item[t] instanceof List){
+		if(item[t] instanceof List){
 			List<Map>lt= liMs(item,t)
 			if(inMem && lt.size()==iZ) item.remove(t)
 			else if(lt[iZ] instanceof Map) for(Map eI in lt)cleanCode(eI,inMem)
-		}
-	}
-	for(String t in ListI){ // expression items
-		if(item.containsKey(t) && item[t] instanceof List){
-			List<Map>lt= liMs(item,t)
-			if(inMem && lt.size()==iZ) item.remove(t)
-			else{
-				if(lt[iZ] instanceof Map) for(Map eI in lt)cleanCode(eI,inMem)
-				else if(inMem) item.remove(t)
-			}
+			else if(inMem && t==sI) item.remove(t) // expression items that are not maps
 		}
 	}
 
 	if(inMem){
-		// comments
-		if(item[sZ]!=null) item.remove(sZ)
-		if(item[sZC]!=null) item.remove(sZC)
-		// UI operand operating keys
-		if(item[sSTR1]!=null) item.remove(sSTR1)
-		if(item[sOK]!=null) item.remove(sOK)
-		if(item[sL]!=null && item[sL] instanceof String) item.remove(sL)
+		// comments, UI operand operating keys
+		for(String k in [sZ,sZC,sSTR1,sOK]) item.remove(k)
+		if(item[sL] instanceof String) item.remove(sL)
 
 		// operands
 		if(ty==sEVERY){ // scheduleTimer
@@ -1738,11 +1693,9 @@ private void cleanCode(Map i,Boolean inMem){
 				if(tCnt==iZ){
 					switch(pCnt){
 						case iZ:
-							if(item[sRO]!=null)item.remove(sRO)
-							if(item[sTO]!=null)item.remove(sTO)
+							item.remove(sRO); item.remove(sTO)
 						case i1:
-							if(item[sRO2]!=null)item.remove(sRO2)
-							if(item[sTO2]!=null)item.remove(sTO2)
+							item.remove(sRO2); item.remove(sTO2)
 						default:
 							if(item[sRO]!=null && sMt(mMs(item,sRO))==sC) item.remove(sTO)
 							if(item[sRO2]!=null && sMt(mMs(item,sRO2))==sC) item.remove(sTO2)
@@ -1788,16 +1741,10 @@ private void checkLabel(Map r9=null){
 		doLog(sERROR,"null label")
 		return
 	}
-	String appLbl=savedLabel
-	if(savedLabel!=sNL){
-		if(act && !dis)wappUpdateLabel(savedLabel)
-		if(!act || dis){
-			String tstr
-			if(dis)tstr=act ? '(Disabled) Kill switch is active' : '(Paused) Kill switch is active'
-			else tstr='(Paused)'
-			String res=appLbl+sSPC+span(tstr,sCLRORG)
-			wappUpdateLabel(res)
-		}
+	if(act && !dis)wappUpdateLabel(savedLabel)
+	else{
+		String tstr= dis ? (act ? '(Disabled) Kill switch is active' : '(Paused) Kill switch is active') : '(Paused)'
+		wappUpdateLabel(savedLabel+sSPC+span(tstr,sCLRORG))
 	}
 }
 
@@ -1873,24 +1820,29 @@ Map pauseP(){
  * resume piston, and initialize its subscriptions & states
  * @param piston
  * @param sndEvt
+ * @param holdsLease caller (handleEvents, setup) holds this piston's execution lease
  * @return ide runtime data
  */
 @CompileStatic
-Map resumeP(LinkedHashMap piston=null,Boolean sndEvt=true){
+Map resumeP(LinkedHashMap piston=null,Boolean sndEvt=true,Boolean holdsLease=false){
+	// from outside a run (initialize/updated): wait for a running execution to finish instead of
+	// resetting its lease; events queued meanwhile are run afterwards
+	Long lS= holdsLease ? lZ : acquireLeaseExt(sRESUME)
+	try{
+		return resumePI(piston,sndEvt)
+	}finally{
+		if(!holdsLease)releaseLeaseExt(lS)
+	}
+}
+
+@CompileStatic
+private Map resumePI(LinkedHashMap piston,Boolean sndEvt){
 	assignSt(sACT,true)
 	assignSt(sSUBS,[:])
 	assignSt(sSCHS,[])
 	assignSt(sCACHE,[:]) // reset followed by
 	stNeedUpdate()
 	cleanState()
-
-	String mSmaNm=sAppId()
-	getTheLock(mSmaNm,sRESUME)
-	theSemaphoresVFLD[mSmaNm]=lZ
-	theSemaphoresVFLD=theSemaphoresVFLD
-	theQueuesVFLD[mSmaNm]=[]
-	theQueuesVFLD=theQueuesVFLD
-	releaseTheLock(mSmaNm)
 
 	clearMyCache('resumeP')
 
@@ -1981,8 +1933,35 @@ Map updModified(Long t){
 }
 
 
-@Field volatile static Map<String,Long> lockTimesVFLD=[:]
-@Field volatile static Map<String,String> lockHolderVFLD=[:]
+@Field static final ConcurrentHashMap<String,String> lockHolderVFLD=new ConcurrentHashMap<String,String>()
+
+// Ownership epoch per stripe: bumped (via CAS) on every acquire and every release, and on an
+// override. Only the execution whose recorded epoch matches the current one may release, so a
+// holder that was overridden cannot release the overrider's lock, and the permit count can
+// never exceed 1.
+@Field static final ConcurrentHashMap<Integer,Long> lockEpochFLD=new ConcurrentHashMap<Integer,Long>()
+// Per-execution (non-static) record of stripes this execution holds: stripe -> epoch / hold count.
+// Non-static @Field values are re-initialized for each app execution, so this is private to the
+// current run; stale entries can never match lockEpochFLD as the epoch changes on every acquire.
+@Field Map<Integer,Long> myLockEpochFLD=[:]
+@Field Map<Integer,Integer> myLockCntFLD=[:]
+
+@CompileStatic
+private static Long casInc(ConcurrentHashMap m,Object k){ // atomic ++ of a counter map entry; returns the new value
+	while(true){
+		Long cur=gtL(m,k)
+		if(m.replace(k,cur,cur+l1))return cur+l1
+	}
+}
+
+@CompileStatic
+private static Long gtL(ConcurrentHashMap m,Object k){ m.putIfAbsent(k,lZ); return (Long)m.get(k) }
+
+@CompileStatic
+private Boolean holdsLock(Integer semaNum){
+	Long myE=myLockEpochFLD[semaNum]
+	return myE!=null && myE==lockEpochFLD.get(semaNum)
+}
 
 @CompileStatic
 void getTheLock(String qname,String meth=sNL,Boolean longWait=false){
@@ -1991,35 +1970,53 @@ void getTheLock(String qname,String meth=sNL,Boolean longWait=false){
 
 @CompileStatic
 Boolean getTheLockW(String qname,String meth=sNL,Boolean longWait=false){
-	Long waitT=longWait? lTHOUS:20L
+	// timed tryAcquire returns as soon as the lock is released; waitT only paces the override check / logging
+	Long waitT=longWait? lTHOUS:250L
 	Boolean wait; wait=false
 	Integer semaNum=semaNum(qname)
 	String semaSNum=semaNum.toString()
+
+	// re-entrant: this execution already holds this stripe (same or colliding qname)
+	if(holdsLock(semaNum)){
+		myLockCntFLD[semaNum]=(myLockCntFLD[semaNum] ?: iZ)+i1
+		return wait
+	}
+
 	Semaphore sema=sema(semaNum)
-	while(!sema.tryAcquire()){
-		// did not get lock
-		Long t; t=lockTimesVFLD[semaSNum]
-		if(t==null){
-			t=wnow()
-			lockTimesVFLD[semaSNum]=t
-			lockTimesVFLD=lockTimesVFLD
-		}
-		if(eric())warn "waiting for ${qname} ${semaSNum} lock access, $meth, long: $longWait, holder: "+sMs(lockHolderVFLD,semaSNum),null
-		wpauseExecution(waitT)
-		wait=true
-		if(elapseT(t)>30000L){
-			sema.drainPermits()
-			lockTimesVFLD[semaSNum]=(Long)null
-			lockTimesVFLD=lockTimesVFLD
-			if(eric())warn "overriding lock $meth",null
+	Long myE; myE=null
+	Long seenE; seenE=null
+	Long seenT; seenT=lZ
+	Boolean got
+	while(true){
+		try{ got=sema.tryAcquire(wait ? waitT:lZ,TimeUnit.MILLISECONDS) }
+		catch(InterruptedException ignored){ got=false }
+		if(got){
+			myE=casInc(lockEpochFLD,semaNum)
 			break
 		}
+		// did not get lock; time how long the *same* holder (same epoch) has held it
+		Long curE=gtL(lockEpochFLD,semaNum)
+		if(curE!=seenE){
+			seenE=curE
+			seenT=wnow()
+		}
+		if(eric())warn "waiting for ${qname} ${semaSNum} lock access, $meth, long: $longWait, holder: "+sMs(lockHolderVFLD,semaSNum),null
+		wait=true
+		if(elapseT(seenT)>30000L){
+			// take over the stuck holder's permit; only one overrider (or the holder's own release) can win
+			Long nxt=seenE+l1
+			if(lockEpochFLD.replace(semaNum,seenE,nxt)){
+				myE=nxt
+				doLog(sWARN,"overriding lock ${qname} ${semaSNum} $meth, holder: "+sMs(lockHolderVFLD,semaSNum))
+				break
+			}
+			// epoch moved (holder released or someone else overrode); keep waiting
+		}
 	}
-	lockTimesVFLD[semaSNum]=wnow()
-	lockTimesVFLD=lockTimesVFLD
+	myLockEpochFLD[semaNum]=myE
+	myLockCntFLD[semaNum]=i1
 	if(eric()){
 		lockHolderVFLD[semaSNum]=sAppId()+sSPC+meth
-		lockHolderVFLD=lockHolderVFLD
 	}
 	return wait
 }
@@ -2028,41 +2025,35 @@ Boolean getTheLockW(String qname,String meth=sNL,Boolean longWait=false){
 void releaseTheLock(String qname){
 	Integer semaNum=semaNum(qname)
 	String semaSNum=semaNum.toString()
-	Semaphore sema=sema(semaNum)
-	lockTimesVFLD[semaSNum]=(Long)null
-	lockTimesVFLD=lockTimesVFLD
-//	lockHolderVFLD[semaSNum]=sNL
-//	lockHolderVFLD=lockHolderVFLD
-	if(sema.availablePermits()==0) sema.release()
+	Long myE=myLockEpochFLD[semaNum]
+	if(myE==null){
+		if(eric())warn "releaseTheLock ${qname} ${semaSNum}: not held by this execution",null
+		return
+	}
+	Integer cnt=(myLockCntFLD[semaNum] ?: i1)-i1
+	if(cnt>iZ && myE==lockEpochFLD.get(semaNum)){
+		myLockCntFLD[semaNum]=cnt // still held re-entrantly
+		return
+	}
+	myLockEpochFLD.remove(semaNum)
+	myLockCntFLD.remove(semaNum)
+	// invalidate our epoch first; if this fails we were overridden and the permit now belongs to the overrider
+	if(!lockEpochFLD.replace(semaNum,myE,myE+l1)){
+		doLog(sWARN,"releaseTheLock ${qname} ${semaSNum}: lock was overridden, not releasing")
+		return
+	}
+	sema(semaNum).release()
 }
 
-@Field static Semaphore theLock0FLD=new Semaphore(1)
-@Field static Semaphore theLock1FLD=new Semaphore(1)
-@Field static Semaphore theLock2FLD=new Semaphore(1)
-@Field static Semaphore theLock3FLD=new Semaphore(1)
-@Field static Semaphore theLock4FLD=new Semaphore(1)
-@Field static Semaphore theLock5FLD=new Semaphore(1)
-@Field static Semaphore theLock6FLD=new Semaphore(1)
-@Field static Semaphore theLock7FLD=new Semaphore(1)
-@Field static Semaphore theLock8FLD=new Semaphore(1)
-@Field static Semaphore theLock9FLD=new Semaphore(1)
-@Field static Semaphore theLock10FLD=new Semaphore(1)
-@Field static Semaphore theLock11FLD=new Semaphore(1)
-@Field static Semaphore theLock12FLD=new Semaphore(1)
-@Field static Semaphore theLock13FLD=new Semaphore(1)
-@Field static Semaphore theLock14FLD=new Semaphore(1)
-@Field static Semaphore theLock15FLD=new Semaphore(1)
-@Field static Semaphore theLock16FLD=new Semaphore(1)
-@Field static Semaphore theLock17FLD=new Semaphore(1)
-@Field static Semaphore theLock18FLD=new Semaphore(1)
-@Field static Semaphore theLock19FLD=new Semaphore(1)
-@Field static Semaphore theLock20FLD=new Semaphore(1)
-@Field static Semaphore theLock21FLD=new Semaphore(1)
-@Field static Semaphore theLock22FLD=new Semaphore(1)
-@Field static Semaphore theLock23FLD=new Semaphore(1)
+// one lock per stripe: 0..iStripes-1 hashed piston ids, iStripes=sTSLF, iStripes+1=sTGBL
+@Field static final List<Semaphore> theLocksFLD=[
+	new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),
+	new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),
+	new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1),new Semaphore(1)
+]
 
 @Field static final Integer iStripes=22
-@Field static Map<String,Integer> semaNumCacheFLD=[:]
+@Field static final ConcurrentHashMap<String,Integer> semaNumCacheFLD=new ConcurrentHashMap<String,Integer>()
 @CompileStatic
 static Integer semaNum(String name){
 	Integer cached=semaNumCacheFLD[name]
@@ -2078,35 +2069,9 @@ static Integer semaNum(String name){
 
 @CompileStatic
 Semaphore sema(Integer snum){
-	switch(snum){
-		case iStripes: return theLock22FLD
-		case iZ: return theLock0FLD
-		case i1: return theLock1FLD
-		case i2: return theLock2FLD
-		case i3: return theLock3FLD
-		case i4: return theLock4FLD
-		case i5: return theLock5FLD
-		case i6: return theLock6FLD
-		case i7: return theLock7FLD
-		case i8: return theLock8FLD
-		case i9: return theLock9FLD
-		case i10: return theLock10FLD
-		case i11: return theLock11FLD
-		case i12: return theLock12FLD
-		case i13: return theLock13FLD
-		case 14: return theLock14FLD
-		case i15: return theLock15FLD
-		case i16: return theLock16FLD
-		case 17: return theLock17FLD
-		case 18: return theLock18FLD
-		case 19: return theLock19FLD
-		case i20: return theLock20FLD
-		case 21: return theLock21FLD
-		case (iStripes+i1): return theLock23FLD
-		default:
-			doLog(sERROR,"bad hash result $snum")
-			return theLock0FLD
-	}
+	if(snum!=null && snum>=iZ && snum<=iStripes+i1)return theLocksFLD[snum]
+	doLog(sERROR,"bad hash result $snum")
+	return theLocksFLD[iZ]
 }
 
 // Murmur3 32-bit finalizer: better avalanche than the old Wang/Jenkins two-step
@@ -2168,90 +2133,186 @@ private static Map cleanEvt(Map evt){
 	return evt
 }
 
-@Field volatile static Map<String,List<Map>> theQueuesVFLD=[:]
-@Field volatile static Map<String,Long> theSemaphoresVFLD=[:]
+@Field static final ConcurrentHashMap<String,List<Map>> theQueuesVFLD=new ConcurrentHashMap<String,List<Map>>()
+@Field static final ConcurrentHashMap<String,Long> theSemaphoresVFLD=new ConcurrentHashMap<String,Long>()
 
 @Field static final String sSEMA='semaphore'
 @Field static final String sSEMAN='semaphoreName'
 @Field static final String sSEMADEL='semaphoreDelay'
 @Field static final String sWAITED='waited'
 @Field static final String sEXITOUT='exitOut'
+@Field static final String sQOVR='qOvr'
+
+@Field static final Long lEXTLEASEW=30000L
+@Field static final Long lLEASEPOLL=25L // poll interval while waiting for another execution's lease
+@Field static final Long lLEASEEXP=100000L // a lease older than this is treated as abandoned
+
+/** caller holds the piston lock: take the lease if it is free or expired; true if taken */
+@CompileStatic
+private static Boolean tryTakeLease(String mSmaNm,Long now){
+	Long cur=theSemaphoresVFLD[mSmaNm]
+	if(cur!=null && cur!=lZ && now-cur<=lLEASEEXP)return false
+	theSemaphoresVFLD[mSmaNm]=now
+	return true
+}
+
+/** caller holds the piston lock: remove and return the oldest queued event, or null if none */
+@CompileStatic
+private static Map popQueuedEvt(String mSmaNm){
+	List<Map> evtQ=theQueuesVFLD[mSmaNm]
+	if(!evtQ)return null
+	List<Map> evtList=evtQ.sort{ Map it -> lMt(it) }
+	Map theEvent=evtList.remove(iZ)
+	theQueuesVFLD[mSmaNm]=evtList
+	return theEvent
+}
+
+/**
+ * For entry points that run outside handleEvents (setup, initialize/updated, delete, IDE clear all):
+ * wait for a running execution of this piston to finish and take its lease, so piston code/state is not
+ * changed underneath a run. Events arriving meanwhile are queued. Returns the lease timestamp, or lZ if
+ * not taken (parallel-execution piston, or still busy after lEXTLEASEW; then proceeds without waiting,
+ * and without resetting the running execution's lease).
+ */
+@CompileStatic
+private Long acquireLeaseExt(String meth){
+	if(isPep(gtState()))return lZ // parallel pistons are not serialized
+	String mSmaNm=sAppId()
+	Long start=wnow()
+	Long now
+	while(true){
+		getTheLock(mSmaNm,meth)
+		now=wnow()
+		if(tryTakeLease(mSmaNm,now)){
+			releaseTheLock(mSmaNm)
+			return now
+		}
+		releaseTheLock(mSmaNm)
+		if(now-start>lEXTLEASEW){
+			doLog(sWARN,"${meth}: piston still running after ${lEXTLEASEW}ms, continuing without waiting")
+			return lZ
+		}
+		wpauseExecution(lLEASEPOLL)
+	}
+}
+
+/** release a lease taken by acquireLeaseExt; optionally discard queued events, else schedule them to run */
+@CompileStatic
+private void releaseLeaseExt(Long lS,Boolean dropQueue=false){
+	String mSmaNm=sAppId()
+	Boolean drain; drain=false
+	getTheLock(mSmaNm,'releaseLeaseExt')
+	if(dropQueue)theQueuesVFLD[mSmaNm]=[]
+	if(lS!=lZ){
+		theSemaphoresVFLD.replace(mSmaNm,lS,lZ) // only if still our lease
+		// events queued behind us have no execution to drain them
+		List<Map> evtQ=theQueuesVFLD[mSmaNm]
+		drain= evtQ!=null && evtQ.size()>iZ
+	}
+	releaseTheLock(mSmaNm)
+	if(drain)wrunInMillis(20L,'drainQueueHandler',[(sDATA):[:]])
+}
+
+/** runs the oldest queued event; that execution drains the rest of the queue when it ends */
+void drainQueueHandler(Map data=null){
+	String mSmaNm=sAppId()
+	getTheLock(mSmaNm,'drainQueueHandler')
+	Map theEvent=popQueuedEvt(mSmaNm)
+	releaseTheLock(mSmaNm)
+	if(theEvent!=null){
+		theEvent[sDATE]=new Date(lMt(theEvent))
+		handleEvents(theEvent,true,false) // takes the lease, or re-queues if an execution started meanwhile
+	}
+}
 
 /** This can a) lock semaphore b) wait for semaphore c) queue event d) just fall through (no locking or waiting) */
 @CompileStatic
-private LinkedHashMap lockOrQueueSemaphore(Boolean synchr,Map event,Boolean queue,Map r9){
-	Long tt1,startTime,r_semaphore,semaphoreDelay,lastSemaphore
-	tt1=wnow()
-	startTime=tt1
+private LinkedHashMap lockOrQueueSemaphore(Map event,Boolean queue){
+	Long tt1,r_semaphore,semaphoreDelay
+	Long startTime=wnow()
 	r_semaphore=lZ
 	semaphoreDelay=lZ
-	String semaphoreName,mSmaNm
-	semaphoreName=sNL
+	String semaphoreName; semaphoreName=sNL
+	String mSmaNm=sAppId()
 	Boolean didQ,waited,clrC
 	didQ=false
-	waited=false
+	clrC=false
+	Integer qsize; qsize=iZ
 
-	if(synchr){
-		mSmaNm=sAppId()
-		waited=getTheLockW(mSmaNm,sLCK1)
-		tt1=wnow()
-
-		clrC=false
-		Integer qsize; qsize=iZ
-		while(true){
-			Long t0=theSemaphoresVFLD[mSmaNm]
-			Long tt0=t0!=null ? t0:lZ
-			lastSemaphore=tt0
-			if(lastSemaphore==lZ || tt1-lastSemaphore>100000L){
-				theSemaphoresVFLD[mSmaNm]=tt1
-				theSemaphoresVFLD=theSemaphoresVFLD
-				mb()
-				semaphoreName=mSmaNm
-				semaphoreDelay=waited ? tt1-startTime:lZ
-				r_semaphore=tt1
-				break
-			}
-			if(queue){
-				if(event!=null){
-					Map mEvt=event
-					List<Map> evtQ
-					evtQ=theQueuesVFLD[mSmaNm]
-					evtQ=evtQ!=null ? evtQ:(List<Map>)[]
-					qsize=evtQ.size()
-					if(qsize>i20) clrC=true
-					else{
-						evtQ.push(mEvt)
-						theQueuesVFLD[mSmaNm]=evtQ
-						theQueuesVFLD=theQueuesVFLD
-						mb()
-						didQ=true
-					}
+	waited=getTheLockW(mSmaNm,sLCK1)
+	tt1=wnow()
+	while(true){
+		if(tryTakeLease(mSmaNm,tt1)){
+			semaphoreName=mSmaNm
+			semaphoreDelay=waited ? tt1-startTime:lZ
+			r_semaphore=tt1
+			break
+		}
+		if(queue){
+			if(event!=null){
+				List<Map> evtQ=theQueuesVFLD[mSmaNm] ?: (List<Map>)[]
+				qsize=evtQ.size()
+				if(qsize>i20) clrC=true
+				else{
+					evtQ.push(event)
+					theQueuesVFLD[mSmaNm]=evtQ
+					didQ=true
 				}
-				break
-			}else{
-				releaseTheLock(mSmaNm)
-				waited=true
-				wpauseExecution(l100)
-				getTheLock(mSmaNm,sLCK2)
-				tt1=wnow()
 			}
+			break
 		}
 		releaseTheLock(mSmaNm)
-		if(clrC){
-			error "large queue size ${qsize}, dropping event",r9
-			didQ=true
-		}
+		waited=true
+		wpauseExecution(lLEASEPOLL)
+		getTheLock(mSmaNm,sLCK2)
+		tt1=wnow()
 	}
+	releaseTheLock(mSmaNm)
+	if(clrC) didQ=true // caller logs the dropped event (it builds the runtime data after this returns)
 	return [
 		(sSEMA):r_semaphore,
 		(sSEMAN):semaphoreName,
 		(sSEMADEL):semaphoreDelay,
 		(sWAITED):waited,
-		(sEXITOUT):didQ
+		(sEXITOUT):didQ,
+		(sQOVR):(clrC ? qsize:iZ)
 	]
 }
 
-@Field volatile static LinkedHashMap<String,LinkedHashMap> theCacheVFLD=[:] // each piston has a map
+@Field static final ConcurrentHashMap<String,LinkedHashMap> theCacheVFLD=new ConcurrentHashMap<String,LinkedHashMap>() // each piston has a map
+
+// Invalidation generations: bumped whenever a cache is cleared, so a builder that read its source
+// data before the clear does not publish a stale entry after it.
+// Keys: piston id (clearMyCache), sGENALL (clearParentCache clears all piston caches), sGENPAR (parent cache)
+@Field static final ConcurrentHashMap<String,Long> cacheGenFLD=new ConcurrentHashMap<String,Long>()
+@Field static final String sGENALL='*all'
+@Field static final String sGENPAR='*parent'
+
+/** generation of a piston's data cache; both components only increase, so any clear changes the sum */
+@CompileStatic
+private static Long gtCacheGen(String id){ return gtL(cacheGenFLD,id)+gtL(cacheGenFLD,sGENALL) }
+
+/** r9 is built from the cached map; give it its own copies of the mutable containers so a running
+ *  piston never mutates the shared cache in place (persisted back explicitly in finalizeEvent/updateLogs).
+ *  Not copied: logs (getTemporaryRunTimeData replaces them) and run history (never changed via r9).
+ *  light: also skip trace and schedules, for getTemporaryRunTimeData, whose r9 either becomes a full r9
+ *  (getRunTimeData replaces both) or is only read. */
+@CompileStatic
+private static LinkedHashMap cpyInner(LinkedHashMap m,Boolean light=false){
+	// sVARS is not copied: r9[sVARS] is never read or changed (variables go through getCachedFields / state)
+	for(String k in (light ? lCPYL : lCPYF)){
+		Object v=m[k]
+		if(v instanceof Map)m[k]=new LinkedHashMap((Map)v)
+	}
+	if(!light){
+		Object v=m[sSCHS]
+		if(v instanceof List)m[sSCHS]=new ArrayList((List)v)
+	}
+	return m
+}
+
+@Field static final List<String> lCPYL=['cache','store','state','temp','cachePersist'] // sCACHE,sSTORE,sST,sTEMP,sPCACHE (literals: some constants are declared later in the file)
+@Field static final List<String> lCPYF=['cache','store','state','trace','temp','cachePersist'] // + sTRC
 
 @Field static final String sCLRMC='clearMyCache'
 /** clear Piston cache */
@@ -2263,10 +2324,10 @@ private void clearMyCache(String meth=sNL){
 	Boolean clrd; clrd=false
 	String mSmaNm=appStr
 	getTheLock(mSmaNm,sCLRMC)
+	casInc(cacheGenFLD,myId) // always: a getDSCache build may be in flight even if the entry is empty now
 	Map t0; t0=theCacheVFLD[myId]
 	if(t0){
 		theCacheVFLD[myId]=[:] as LinkedHashMap
-		theCacheVFLD=theCacheVFLD
 		clrd=true
 		t0=null
 	}
@@ -2294,7 +2355,6 @@ private LinkedHashMap getCachedMaps(String meth=sNL,Boolean retry=true,Boolean U
 			return res
 		}
 		theCacheVFLD[myId]=([:] as LinkedHashMap)
-		theCacheVFLD=theCacheVFLD
 	}
 	releaseTheLock(mSmaNm)
 	if(retry){
@@ -2304,6 +2364,31 @@ private LinkedHashMap getCachedMaps(String meth=sNL,Boolean retry=true,Boolean U
 	}
 //	if(eric())doLog(sWARN,'cached map nf')
 	return null
+}
+
+/** Like getCachedMaps, but copies only the requested top-level fields instead of the whole entry
+ *  (an empty list just tests for a valid entry). Values are the shared cached objects: read only.
+ *  Returns null when no valid cache can be produced. */
+@CompileStatic
+private LinkedHashMap getCachedFields(String meth,List<String> keys,Boolean retry=true){
+	String myId=sAppId()
+	LinkedHashMap res; res=null
+	getTheLock(myId,sI)
+	LinkedHashMap e=theCacheVFLD[myId]
+	if(e){
+		if(e[sCACHE] instanceof Map && e[sBLD] instanceof Integer){
+			res=new LinkedHashMap()
+			for(String k in keys) if(e.containsKey(k))res[k]=e[k]
+		}else{
+			theCacheVFLD[myId]=([:] as LinkedHashMap)
+		}
+	}
+	releaseTheLock(myId)
+	if(res==null && retry){
+		getDSCache(meth,true)
+		return getCachedFields(meth,keys,false)
+	}
+	return res
 }
 
 private Map gtCachedAtomicState(){
@@ -2333,7 +2418,7 @@ private Map gtCachedAtomicState(){
  *  Always records state-read latency in r9[sSTACCESS] and calls checkLabel on a
  *  fresh build when the piston has a non-zero build number. */
 @CompileStatic
-private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
+private LinkedHashMap getDSCache(String meth,Boolean Upd=true,Boolean light=false){
 	String myId=sAppId()
 	String appStr=myId
 	String mSmaNm=myId
@@ -2348,6 +2433,7 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 	res=theCacheVFLD[myId]
 
 	if(!res){
+		Long gen0=gtCacheGen(myId)
 		releaseTheLock(mSmaNm)
 		stateStart=wnow()
 		Map mst=gtState()
@@ -2360,12 +2446,10 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 		ttt=sMs(mst,sSVLBL)
 		if(ttt==sNL){
 			ttt=gtAppN()
-			if(bld>iZ){
-				assignSt(sSVLBL,ttt)
-			}
+			if(bld>iZ)assignSt(sSVLBL,ttt)
 		}
-		LinkedHashMap te1
-		te1=[
+		Map t1
+		t1=[
 			(sFFT):iZ,
 			(sRUN):true,
 			(sLOGNG): mst[sLOGNG]!=null ? iMs(mst,sLOGNG):iZ,
@@ -2388,9 +2472,6 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 			(sNSCH): lZ,
 			(sLEXEC): lZ,
 			(sSTORE): [:],
-		]
-		Map t1
-		t1=te1+[
 			(sID): hashPID(appStr), // TODO this is not unique across accounts, locations, webCoRE instances
 			(sNM): ttt,
 			(sSVLBL): ttt,
@@ -2404,19 +2485,18 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 		] as Map
 		stateEnd=wnow()
 
-		Map m0,aS
-		List l0
+		Map aS
 		aS=isPep(t1)? gtCachedAtomicState():mst
-		m0=mMs(aS,sCACHE); t1[sCACHE]=m0 ? m0:[:]
-		m0=mMs(aS,sSTORE); t1[sSTORE]=m0 ? m0:[:]
-		m0=mMs(aS,sST); t1[sST]=m0 ? m0:[:]
+		t1[sCACHE]=mMs(aS,sCACHE) ?: [:]
+		t1[sSTORE]=mMs(aS,sSTORE) ?: [:]
+		t1[sST]=mMs(aS,sST) ?: [:]
 		t1[sPSTNZ]=sMs(aS,sPSTNZ)
-		m0=mMs(aS,sTRC); t1[sTRC]=m0 ? m0:[:]
-		l0=liMs(aS,sSCHS); t1[sSCHS]=l0 ? []+l0:[]
+		t1[sTRC]=mMs(aS,sTRC) ?: [:]
+		t1[sSCHS]=[]+(liMs(aS,sSCHS) ?: [])
 		t1[sNSCH]=lMs(aS,sNSCH)
 		t1[sLEXEC]=lMs(aS,sLEXEC)
-		l0=liMs(aS,sLOGS); t1[sLOGS]=l0 ? []+l0:[]
-		m0=mMs(aS,sVARS); t1[sVARS]=m0 ? [:]+m0:[:]
+		t1[sLOGS]=[]+(liMs(aS,sLOGS) ?: [])
+		t1[sVARS]=[:]+(mMs(aS,sVARS) ?: [:])
 
 		loadTZs(t1,sMs(aS,sTZ))
 
@@ -2426,41 +2506,42 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 		t1[sDEVS]=devs && devs instanceof List ? ((List)devs).collectEntries{ Object it -> [(hashD(t1,it)):it]}:[:]
 
 		if((Boolean)gtSetting(sLOGHE))t1[sLOGHE]=true
-		Integer mS,st,at1
-		mS=iMs(gtPLimits(),sMSTATS)
-		st=(Integer)gtSetting(sMSTATS)
-		at1=st!=null ? st:mS
-		if(at1<=iZ)at1=mS
-		if(at1<i2)at1=i2
-		t1[sMSTATS]=at1
-
-		Integer myL,ml,lim
-		myL=iMs(gtPLimits(),sMLOGS)
-		ml=(Integer)gtSetting(sMLOGS)
-		lim=ml!=null ? ml:myL
-		if(lim<iZ)lim=myL
-		t1[sMLOGS]=lim
+		Integer st=(Integer)gtSetting(sMSTATS)
+		t1[sMSTATS]=Math.max(st!=null && st>iZ ? st:iMs(gtPLimits(),sMSTATS), i2)
+		Integer ml=(Integer)gtSetting(sMLOGS)
+		t1[sMLOGS]=ml!=null && ml>=iZ ? ml:iMs(gtPLimits(),sMLOGS)
 
 		res= t1 as LinkedHashMap
-		r9= (LinkedHashMap)(res+pC)
+		r9= cpyInner((LinkedHashMap)(res+pC),light)
 
 		sendM=true
 		if(Upd){
 			t1['Cached']=true
+			LinkedHashMap nt1= t1 as LinkedHashMap
+			Boolean pub; pub=false
 			getTheLock(mSmaNm,sGDS+s2)
-			theCacheVFLD[myId]= t1 as LinkedHashMap
-			theCacheVFLD=theCacheVFLD
+			// publish only if no clear happened while we built, and nobody else published first
+			if(gtCacheGen(myId)==gen0 && !theCacheVFLD[myId]){
+				theCacheVFLD[myId]=nt1
+				pub=true
+			}
 			releaseTheLock(mSmaNm)
+			// clearParentCache is not serialized by our lock; if it ran meanwhile, withdraw our entry
+			if(pub && gtCacheGen(myId)!=gen0)theCacheVFLD.remove(myId,nt1)
 		}
-		te1=null;t1=null;aS=null;m0=null;l0=null
+		t1=null;aS=null
 
 		if(eric() && sendM){
 			String s= Upd ? '/cached':sBLK
 			debug 'creating'+s+' my piston cache '+meth,r9
 		}
 	}else{
-		r9= (LinkedHashMap)(res+pC)
+		// writers replace the entry's values (nc[k]=v) and never change the inner maps in place, so a
+		// top-level snapshot under the lock is enough; merge and copy the inner maps after releasing it
+		r9=new LinkedHashMap(res)
 		releaseTheLock(mSmaNm)
+		r9.putAll(pC)
+		cpyInner(r9,light)
 	}
 	if(stateStart!=lZ) r9[sSTACCESS]=stateEnd-stateStart
 	pC=null
@@ -2469,16 +2550,19 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true){
 	return r9
 }
 
-@Field volatile static LinkedHashMap<String,LinkedHashMap> theParentCacheVFLD=[:]
+@Field static final ConcurrentHashMap<String,LinkedHashMap> theParentCacheVFLD=new ConcurrentHashMap<String,LinkedHashMap>()
 
 void clearParentCache(String meth=sNL){
 	String lockTyp='clearParentCache'
 	String semName=sTSLF
 	String wName=sPAppId()
 	getTheLock(semName,lockTyp,true)
-	theParentCacheVFLD[wName]=null
-	theParentCacheVFLD=theParentCacheVFLD
-	theCacheVFLD=[:] // reset all pistons cache
+	casInc(cacheGenFLD,sGENPAR)
+	theParentCacheVFLD.remove(wName)
+	casInc(cacheGenFLD,sGENALL) // before clearing, so in-flight getDSCache builds will not publish
+	theCacheVFLD.clear() // reset all pistons cache
+	devAttrTypeFLD.clear() // device attribute types (drivers may have changed)
+	devHasCmdFLD.clear() // device commands (drivers may have changed)
 	clearHashMap(wName)
 	releaseTheLock(semName)
 	loadCDB()
@@ -2507,11 +2591,13 @@ private void loadCDB(){
 	PhysicalCommandsF()
 }
 
+@CompileStatic
 private LinkedHashMap getParentCache(){
 	String wName=sPAppId()
 	LinkedHashMap res
 	res=theParentCacheVFLD[wName]
 	if(res==null){
+		Long gen0=gtL(cacheGenFLD,sGENPAR)
 		Map t0=wgtPdata()
 		String lpe= sLOGPE
 		String aid= 'accountId'
@@ -2537,10 +2623,11 @@ private LinkedHashMap getParentCache(){
 		Boolean sendM; sendM=false
 		getTheLock(semName,sGETPCACHE,true)
 		res=theParentCacheVFLD[wName]
-		if(res==null){
-			res=t1
-			theParentCacheVFLD[wName]=t1
-			theParentCacheVFLD=theParentCacheVFLD
+		if(res==null && gtL(cacheGenFLD,sGENPAR)!=gen0){
+			res=t1 as LinkedHashMap // cleared while we read parent data; use it once, do not cache
+		}else if(res==null){
+			res=t1 as LinkedHashMap
+			theParentCacheVFLD[wName]=res
 			clearHashMap(wName)
 			sendM=true
 		}
@@ -2566,7 +2653,7 @@ private LinkedHashMap getTemporaryRunTimeData(Long startTime=wnow()){
 		if(thePhysCommandsFLD==null) loadCDB()
 		releaseTheLock(semName)
 	}
-	LinkedHashMap r9=getDSCache(sGETTRTD)
+	LinkedHashMap r9=getDSCache(sGETTRTD,true,true)
 	r9[sTMP]=true
 	r9[sTMSTMP]=startTime
 	r9[sLOGS]=[[(sT):startTime]]
@@ -2584,8 +2671,8 @@ private LinkedHashMap getTemporaryRunTimeData(Long startTime=wnow()){
  * @return
  */
 @CompileStatic
-private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=null,Boolean doit=false,Boolean shorten=true,Boolean inMem=false){
-	LinkedHashMap r9,piston,m1
+private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=null,Boolean doit=false,Boolean shorten=true,Boolean inMem=false,Boolean loadLV=true){
+	LinkedHashMap r9,piston
 	piston=null
 	r9=ir9
 	Long started=wnow()
@@ -2603,9 +2690,10 @@ private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=
 
 	if(r9[sTMP]!=null) r9.remove(sTMP)
 
-	m1=[:]
-	if(retSt!=null) m1=retSt
-	r9=(LinkedHashMap)(r9+m1)
+	// handleEvents (the only caller passing retSt) hands over a private map it discards: merge in place.
+	// Other callers keep a copy (e.g. proxyEvaluateExpression's map comes from the parent)
+	if(retSt!=null) r9.putAll(retSt)
+	else r9=new LinkedHashMap(r9)
 
 	r9[sTMSTMP]=timestamp
 	r9[sLSTART]=lstarted
@@ -2622,7 +2710,7 @@ private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=
 	r9[sSYSVARS]=getSystemVariables()
 
 	Map aS
-	aS=getCachedMaps(sGETRTD)
+	aS=getCachedFields(sGETRTD,[sST,sVARS])
 	aS=aS!=null?aS:[:]
 	Map st=mMs(aS,sST)
 	Map st1=st!=null && st instanceof Map ? [:]+st : [(sOLD):sBLK,(sNEW):sBLK] as LinkedHashMap
@@ -2636,7 +2724,9 @@ private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=
 
 	r9[sPISTN]=piston
 
-	getLocalVariables(r9,aS,doit)
+	// handleEvents passes loadLV=false: executeEvent loads local variables itself (a new run re-initializes them anyway)
+	// subscribeAll (below) reads variables, so load them whenever it will run
+	if(loadLV || doit || doSubScribe)getLocalVariables(r9,aS,doit)
 	piston=null
 
 	if(doSubScribe || doit){
@@ -2645,10 +2735,12 @@ private LinkedHashMap getRunTimeData(LinkedHashMap ir9=null,LinkedHashMap retSt=
 		Map pData
 		pData=mMs(thePistonCacheFLD,pNm)
 		if(shorten && inMem && pNm!=sBLK && pData!=null && pData[sPIS]==null){
-			pData[sPIS]=[:]+(LinkedHashMap)r9[sPISTN]
-			thePistonCacheFLD[pNm]=[:]+pData
+			Map npData=[:]+pData
+			npData[sPIS]=[:]+(LinkedHashMap)r9[sPISTN]
+			// tag with the build of the settings/state this execution read the piston from
+			npData[sBLD]=iMs(gtState(),sBLD)
+			thePistonCacheFLD.replace(pNm,pData,npData) // only if the entry was not changed meanwhile
 			pData=null
-			mb()
 			if(eric()){
 				debug 'creating piston-code-cache',null
 				dumpPCsize()
@@ -2675,8 +2767,7 @@ private void dumpPCsize(){
 	String mStr="piston plist is ${t0} elements, and ${t1} bytes".toString()
 	doLog(sDBG,mStr)
 	if(t1>40000000){
-		thePistonCacheFLD=[:]
-		mb()
+		thePistonCacheFLD.clear()
 		doLog(sWARN,"clearing entire "+mStr)
 	}
 }
@@ -2790,7 +2881,9 @@ void killSwitchDisable(){
 	wunsubscribe()
 	wunschedule()
 	assignSt(sSCHS,[])
+	assignSt(sNSCH,lZ) // job is gone; processSchedules re-arms only when sNSCH differs
 	assignSt(sSUBS,[:])
+	clearMyCache('killSwitchDisable') // cached sSCHS / sNSCH are stale now
 }
 
 Map fakeResp(Boolean v){
@@ -2855,7 +2948,22 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	Long startTime=wnow()
 	LinkedHashMap event,tmpRtD,retSt
 	event=fixEvt(evt)
+
+	// take the lease before building the runtime data: a run finishing in between would otherwise leave
+	// this run with its pre-save cache, store, temp and nextSchedule
+	Map pc=getCachedFields(sHNDLEVT,[sPEP])
+	Boolean myPep= pc!=null ? bIs(pc,sPEP) : bIs(gtState(),sPEP)
+	Boolean serializationOn=!myPep // && true // on / off switch
+	Boolean doSerialization=serializationOn && !callMySelf
+
+	Long lStart=wnow()
+	retSt=[(sSEMA):lZ,(sSEMAN):sNL,(sSEMADEL):lZ] as LinkedHashMap
+	if(doSerialization) retSt=lockOrQueueSemaphore(event,queue)
+	Long lEnd=wnow()
+
 	tmpRtD= getTemporaryRunTimeData(startTime)
+	tmpRtD[sLSTART]=lStart
+	tmpRtD[sLSEND]=lEnd
 	Map msg=timer(sEPS,tmpRtD,iN1) ?: ([:] as LinkedHashMap)
 	String evntName; evntName=sMs(event,sNM)
 	String evntVal; evntVal=String.valueOf(event[sVAL])
@@ -2867,8 +2975,9 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		recStr=evntName==sTIME && bIs(event,sRECOVERY) ? '/recovery':sBLK
 		recStr+=bIs(event,sPHYS) ? '/physical':sBLK
 		String valStr; valStr= evntVal
-		if(evntName in [sHSMALRT,sHSMRULE,sHSMRULES])
-			valStr+= ((evntName==sHSMALRT && evntVal==sRULE) || evntName in [sHSMRULE,sHSMRULES] ? sCOMMA+stripH(sMs(event,sDESCTXT)):sBLK)
+		Boolean hsmR= evntName==sHSMRULE || evntName==sHSMRULES
+		if(hsmR || evntName==sHSMALRT)
+			valStr+= ((evntName==sHSMALRT && evntVal==sRULE) || hsmR ? sCOMMA+stripH(sMs(event,sDESCTXT)):sBLK)
 		String mymsg
 		mymsg= !queue && callMySelf ? 'Working queued' : 'Received'
 		mymsg+=' event ['+devStr+'].'+evntName+recStr+' = '+valStr+" with a delay of ${eventDelay}ms"
@@ -2878,17 +2987,11 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	}
 
 
-	Boolean myPep=isPep(tmpRtD)
-	Boolean strictSync=true // could be a setting
-	Boolean serializationOn=!myPep // && true // on / off switch
-	Boolean doSerialization=serializationOn && !callMySelf
-
-	tmpRtD[sLSTART]=wnow()
-	retSt=[(sSEMA):lZ,(sSEMAN):sNL,(sSEMADEL):lZ] as LinkedHashMap
 	if(doSerialization){
-		retSt=lockOrQueueSemaphore(doSerialization,event,queue,tmpRtD)
 		if(bIs(retSt,sEXITOUT)){
-			if(lg!=iZ){
+			Integer qo=iMs(retSt,sQOVR)
+			if(qo) error "large queue size ${qo}, dropping event",tmpRtD
+			else if(lg!=iZ){
 				msg[sM]='Event queued'
 				info msg,tmpRtD
 			}
@@ -2900,7 +3003,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		Long tl= lMs(retSt,sSEMADEL)
 		if(lg>i2 && tl>lZ)warn 'Piston waited for semaphore '+tl+sMS,tmpRtD
 	}
-	tmpRtD[sLSEND]=wnow()
+	Boolean haveLease=lMs(retSt,sSEMA)!=lZ
 
 
 	Boolean clrC; clrC=evntName==sCLRC
@@ -2917,7 +3020,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		}
 		updateLogs(tmpRtD)
 		if(resume){
-			nrtD=resumeP()
+			nrtD=resumeP(null,true,haveLease)
 		}else{ // pause
 			nrtD=pauseP()
 		}
@@ -2941,14 +3044,13 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		updateLogs(tmpRtD)
 		Map nrtD; nrtD= null
 		if(clrL) nrtD= clear1(true, true, true, false, true)
-		else if(clrA) nrtD= clear1(true, true, true, true) // resets semaphore
+		else if(clrA) nrtD= clear1(true, true, true, true, false, haveLease) // keeps semaphore if we hold it
 		else if(clrC){
 			Long lexec= lMs(gtState(),sLEXEC)
 			if(lexec==null || elapseT(lexec) > 3660000L) nrtD= clear1(true, false, false, false)
 			else nrtD= shortRtd(tmpRtD) // getRunTimeData(tmpRtD,null,false,true,true))
 		}
 		relaypCall(nrtD)
-		//if(clrA) return // no longer have semaphore
 		tmpRtD= getTemporaryRunTimeData(startTime)
 	}
 
@@ -2970,7 +3072,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 
 	tmpRtD[sPCACHE]=[:]
 	LinkedHashMap r9
-	r9= getRunTimeData(tmpRtD,retSt,false,true,true)
+	r9= getRunTimeData(tmpRtD,retSt,false,true,true,false) // local variables are loaded by executeEvent
 	tmpRtD=null
 	retSt=null
 	checkVersion(r9)
@@ -3010,7 +3112,6 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		}
 
 		Map msg2; msg2=null
-		Boolean syncTime
 		firstTime=true
 		if( (evntName==sTIME && bIs(event,sRECOVERY)) || !(evntName in ListTIMEASYNC)){
 			if(lg>i1){
@@ -3022,14 +3123,13 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			firstTime=false
 		}
 
-		if(evntName==sTIME && !bIs(event,sRECOVERY))
+		if(evntName==sTIME){
+			// recovery: the hub job may be gone; clear it and sNSCH so processSchedules re-arms it
+			if(bIs(event,sRECOVERY) && lMs(r9,sNSCH)!=lZ) wunschedule(sTIMHNDR)
 			chgNextSch(r9,lZ)
-
-		syncTime=true
-		Boolean sv_syncTime=syncTime
+		}
 
 		List<Map> schedules
-		Boolean a
 		String mSmaNm=sMs(r9,snId)
 		Map sch
 		Long sVariance=lMs(gtPLimits(),sSCHVARIANCE)
@@ -3037,12 +3137,11 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 		Long schdR=lMs(gtPLimits(),sSCHREM)
 		r9[sDID3OR5]=false
 		while(success && !bIs(r9,sDID3OR5) && eT+lMs(r9,sTMSTMP)-wnow()>schdR){
+			Boolean syncTime; syncTime=true
 			// if no queued events
 			if(!firstTime && serializationOn){
-				Boolean inq; inq=false
 				getTheLock(mSmaNm,sHNDLEVT)
-				List<Map> evtQ=theQueuesVFLD[mSmaNm]
-				if(evtQ)inq=true
+				Boolean inq=!!theQueuesVFLD[mSmaNm]
 				releaseTheLock(mSmaNm)
 				if(inq){
 					if(isEric(r9))warn "found pending queued events",null
@@ -3051,8 +3150,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			}
 
 			schedules=sgetSchedules(sHNDLEVT,myPep)
-			if(schedules==null || schedules==(List<Map>)[] || schedules.size()==iZ)
-				break
+			if(!schedules)break
 			Long t=wnow()
 
 			if(evntName==sASYNCREP){
@@ -3081,7 +3179,9 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			}
 
 			sch=mMs(event,sSCH)
-			schedules=sgetSchedules(sHNDLEVT+s1,myPep)
+			// serialized: this execution holds the lease and nothing above changed the saved schedules, so reuse
+			// the list read at the top of this pass (a private copy); parallel pistons re-read to narrow races
+			if(!serializationOn) schedules=sgetSchedules(sHNDLEVT+s1,myPep)
 			schedules.remove(sch)
 			updateSchCache(r9,schedules,sHNDLEVT+s1,sX,myPep)
 
@@ -3090,14 +3190,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 
 				r9[sPCACHE]=[:]
 				Map<String,Map>sysV=msMs(r9,sSYSVARS)
-				sysV[sDLLRINDX][sV]=null
-				sysV[sDLLRDEVICE][sV]=null
-				sysV[sDLLRDEVS][sV]=null
-				sysV[sHTTPCNTN][sV]=null
-				sysV[sHTTPCODE][sV]=null
-				sysV[sHTTPOK][sV]=null
-				sysV[sIFTTTCODE][sV]=null
-				sysV[sIFTTTOK][sV]=null
+				for(String k in [sDLLRINDX,sDLLRDEVICE,sDLLRDEVS,sHTTPCNTN,sHTTPCODE,sHTTPOK,sIFTTTCODE,sIFTTTOK]) sysV[k][sV]=null
 				r9[sSYSVARS]=sysV
 
 				event[sT]=lMt(sch)
@@ -3167,7 +3260,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 				}
 			}
 
-			if(syncTime && strictSync){
+			if(syncTime){
 				Long delay; delay=Math.round(lMt(sch)-d1*wnow())
 				if(delay>lZ){
 					delay=delay<sVariance ? delay:sVariance
@@ -3181,7 +3274,6 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			success=executeEvent(r9,event)
 			if(lg>i1)trace msg2,r9
 			firstTime=false
-			syncTime=sv_syncTime
 		}
 
 		((Map)((Map)r9[sSTATS])[sTIMING])[sE]=elapseT(eStrt)
@@ -3198,7 +3290,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	}
 
 	String mSmaNm=sMs(r9,sSEMAN)
-	Long lS=lMs(r9,sSEMA)
+	Long lS; lS=lMs(r9,sSEMA)
 
 	event=null
 	r9=null
@@ -3210,26 +3302,27 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	while(doSerialization && mSmaNm!=sNL){
 		getTheLock(mSmaNm,sHNDLEVT+s2)
 		List<Map> evtQ
-		mb()
 		evtQ=theQueuesVFLD[mSmaNm]
 		if(!evtQ){
 			if(theSemaphoresVFLD[mSmaNm]<=lS){
 				if(lg>i2)msgt='Released Lock and exiting'
 				theSemaphoresVFLD[mSmaNm]=lZ
-				theSemaphoresVFLD=theSemaphoresVFLD
-				mb()
 			}
 			releaseTheLock(mSmaNm)
 			break
 		}else{
-			Map theEvent
-			evtQ=theQueuesVFLD[mSmaNm]
-			List<Map>evtList=evtQ.sort{ Map it -> lMt(it) }
-			theEvent=evtList.remove(iZ)
-			Integer qsize=evtList.size()
-			theQueuesVFLD[mSmaNm]=evtList
-			theQueuesVFLD=theQueuesVFLD
-			mb()
+			Long curS=theSemaphoresVFLD[mSmaNm]
+			if(curS!=null && curS>lS){
+				// another run took over the lease (expired); it now owns draining the queue
+				if(lg>i2)msgt='Lease taken over, exiting'
+				releaseTheLock(mSmaNm)
+				break
+			}
+			// refresh the lease for each queued event so a long drain cannot exceed the lLEASEEXP lease expiry
+			lS=wnow()
+			theSemaphoresVFLD[mSmaNm]=lS
+			Map theEvent=popQueuedEvt(mSmaNm) // non-null: evtQ is non-empty
+			Integer qsize=theQueuesVFLD[mSmaNm].size()
 			releaseTheLock(mSmaNm)
 
 			if(qsize>i8)error "large queue size ${qsize}".toString(),null
@@ -3284,7 +3377,7 @@ private static void fill_cleanData(){
 					sSTACCESS, sATHR, sBLD, sNWCACHE, sMEDIADATA, sMEDIATYPE, sMEDIAID, sMEDIAURL, sWEAT,
 					sLOGS, sTRC, sSYSVARS, sLOCALV, sPREVEVT, sJSON, sRESP,
 					sCACHE, sSTORE, sSETTINGS, sLOCMODEID, 'coreVersion', sHCOREVER, sCNCLATNS, sCNDTNSTC, sPSTNSTC, sFFT, sRUN,
-					sRESUMED, sTERM, sINSTID, sWUP, sSTMTL, sARGS, 'nfl', sTEMP]
+					sRESUMED, sTERM, sINSTID, sWUP, sSTMTL, sARGS, 'nfl', sTEMP, 'attrMemo']
 	if(cleanData1.size()==iZ)
 		cleanData1= [sLSTART,sLSEND,sGENIN,sPSTART,sPEND]
 	if(cleanData2.size()==iZ)
@@ -3383,11 +3476,16 @@ private Boolean executeEvent(Map r9,Map event){
 			mEvt[sINDX]=srcEvent[sINDX]
 			mEvt[sPHYS]=!!srcEvent[sPHYS]
 			mEvt[isRSM]=true
+			if(r9[sLOCALV]==null){ // resuming: load stored values (not loaded by getRunTimeData for handleEvents)
+				Map aS
+				aS=getCachedFields('executeEvent glv',[sVARS])
+				getLocalVariables(r9,aS!=null?aS:[:],false)
+			}
 		}else{
 			// this is a new run starting from top, so setup local variables that have initial values
 			clearReadFLDs(r9)
 			Map aS
-			aS=getCachedMaps('executeEvent glv')
+			aS=getCachedFields('executeEvent glv',[sVARS])
 			aS=aS!=null?aS:[:]
 			getLocalVariables(r9,aS,true)
 		}
@@ -3520,17 +3618,15 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 	String myId=sMs(r9,snId)
 	// warm-up: rebuilds theCacheVFLD[myId] from state if it was cleared; result is
 	// only tested for null to guard the two cache-update blocks below
-	Map cacheExists=getCachedMaps(sFINLZ)
+	Map cacheExists=getCachedFields(sFINLZ,lEMPTYS)
 
 	processSchedules(r9,true)
-//	Long el1=elapseT(startTime)
 
 	if(success){
 		if(isInf(r9))info iMsg,r9
 	}else error iMsg,r9
 
 	updateLogs(r9,lMs(r9,sTMSTMP))
-//	Long el2=elapseT(startTime)
 
 	if(!bIs(r9,sDID3OR5))
 		((Map)r9[sTRC])[sD]=elapseT(lMt(mMs(r9,sTRC)))
@@ -3538,7 +3634,6 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 	//save / update changed cache values
 	for(Map.Entry<String,Map> item in msMs(r9,sNWCACHE)) ((Map)r9[sCACHE])[item.key]=item.value
 
-//	Long el3=elapseT(startTime)
 	//overwrite state might have changed meanwhile
 	if(cacheExists!=null){
 		getTheLock(myId,sFINLZ)
@@ -3548,14 +3643,14 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 			nc[sLSTPCSNT]=r9[sLSTPCSNT]
 			if(nc[sLSTPCQ]==null) nc.remove(sLSTPCQ)
 			if(nc[sLSTPCSNT]==null) nc.remove(sLSTPCSNT)
-			// store across runs
-			nc[sCACHE]=[:]+mMs(r9,sCACHE)
-			nc[sSTORE]=[:]+mMs(r9,sSTORE)
+			// store across runs. r9 got its own copies of these (cpyInner / getRunTimeData) and drops them
+			// below (cleanData), so they are handed over without copying again. sST stays in r9, so copy it.
+			nc[sCACHE]=mMs(r9,sCACHE)
+			nc[sSTORE]=mMs(r9,sSTORE)
 			nc[sST]=[:]+mMs(r9,sST)
 			if(!bIs(r9,sDID3OR5))
-				nc[sTRC]=[:]+mMs(r9,sTRC)
+				nc[sTRC]=mMs(r9,sTRC)
 			theCacheVFLD[myId]=nc
-			theCacheVFLD=theCacheVFLD
 		}
 		releaseTheLock(myId)
 	}
@@ -3571,34 +3666,14 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 		if(!bIs(r9,sDID3OR5)) assignSt(sTRC,mMs(r9,sTRC))
 	}
 
-//	Long el4=elapseT(startTime)
 //remove large stuff
 	for(String foo in cleanData) r9.remove(foo)
 
 	if(bIs(r9,sUPDDEVS))updateDeviceList(r9)
 	r9[sDEVS]=[:]
 
-//	Long el5=elapseT(startTime)
 	Map<String,Map> tt=msMs(r9,sGVCACHE)
 	if(tt!=null || r9[sGVSTOREC]!=null){
-/*		if(tt!=null){
-			String semName=sTGBL
-			String wName=sMs(r9,spId)
-			getTheLock(semName,sFINLZ)
-			Map vars=globalVarsVFLD[wName]
-			for(var in tt){
-				String varName=(String)var.key
-				if(varName && varName.startsWith(sAT) && vars[varName]){
-					def val=var.value[sV]
-					def oval=vars[varName][sV]
-					if(val!=oval){
-						vars[varName][sV]=val
-						globalVarsVFLD=globalVarsVFLD
-					}
-				}
-			}
-			releaseTheLock(semName)
-		} */
 		r9[sPISTN]= [(sZ): sMs(r9,sPSTNZ)] as Map
 		relaypCall(r9)
 		r9.remove(sGVCACHE)
@@ -3610,11 +3685,9 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 		Map myRt=shortRtd(r9)
 		relaypCall(myRt)
 	}
-//	Long el6=elapseT(startTime)
 	r9[sPISTN]=null
 
 	((Map)((Map)r9[sSTATS])[sTIMING])[sU]=elapseT(startTime)
-//	doLog(sERROR,"el1: $el1  el2: $el2  el3: $el3 el4: $el4 el5: $el5 el6: $el6")
 
 //update graph data
 	Map stats
@@ -3642,24 +3715,25 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 	((Map)r9[s])[sTIMING]=null
 
 	if(cacheExists!=null){
-
 		s=sFINLZ+s1
-		// lock only to get a consistent snapshot of nc; released immediately because
-		// each updateCacheFld call acquires the lock independently for its own write
+		// values computed before taking the lock; one lock for all three cache writes
+		Integer runT=elapseT(lMs(r9,sTMSTMP)).toInteger()
+		String memS=mem(true,lMEMW) // was a full state serialization every run
+		Map runs=[:]+mMs(r9,sCURS)
 		getTheLock(myId,s)
 		Map nc=theCacheVFLD[myId]
-		releaseTheLock(myId)
 		if(nc){
-			t1=i20
 			List hisList
-			hisList=(List)nc[sRTHIS]
-			hisList.push( elapseT(lMs(r9,sTMSTMP)).toInteger() )
+			hisList=[]+(List)(nc[sRTHIS] ?: []) // copy; the cached list may be read concurrently
+			hisList.push(runT)
 			t2=hisList.size()
-			if(t2>t1)hisList=hisList[t2-t1..t2-i1]
-			updateCacheFld(r9,sRTHIS,hisList,s,false)
+			if(t2>i20)hisList=hisList[t2-i20..t2-i1]
+			nc[sRTHIS]=hisList
+			nc[sMEM]=memS
+			nc[sRUNS]=runs
+			theCacheVFLD[myId]=nc
 		}
-		updateCacheFld(r9,sMEM,mem(),s,false)
-		updateCacheFld(r9,sRUNS,[:]+mMs(r9,sCURS),s,false)
+		releaseTheLock(myId)
 	}
 }
 
@@ -3675,7 +3749,7 @@ private static Boolean spshSch(Map r9,Map sch){ return liMs(r9,sSCHS).push(sch) 
 @CompileStatic
 private List<Map> sgetSchedules(String t,Boolean myPep){
 	List<Map> schedules
-	Map t0=getCachedMaps(t)
+	Map t0=getCachedFields(t,[sSCHS])
 	if(t0!=null)schedules=(List<Map>)[]+liMs(t0,sSCHS)
 	else schedules=(myPep ? (List<Map>)gtAS(sSCHS):(List<Map>)gtSt(sSCHS)) ?: ([] as List<Map>)
 	return schedules
@@ -3689,6 +3763,7 @@ private void updateSchCache(Map r9,List<Map> schedules,String t,String lt,Boolea
 	updateCacheFld(r9,sSCHS,(List<Map>)[]+schedules,t+lt,true)
 }
 
+@CompileStatic
 private static LinkedHashMap initCncl(){ return [(sSTMTS):[],(sCONDITIONS):[],(sALL):false] as LinkedHashMap }
 
 @Field static final String sPROCS='processSchedules'
@@ -3700,6 +3775,7 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 	Boolean myPep=isPep(r9)
 	List<Map> schedules,ts
 	schedules=sgetSchedules(sPROCS,myPep)
+	Integer oSz=schedules.size()
 	ts=[]+schedules
 	Boolean lg=isTrc(r9)
 
@@ -3768,8 +3844,12 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 
 	r9[sCNCLATNS]=initCncl()
 
-	schedules=(schedules+sgtSch(r9))//.sort{ lMt(it) }
-	updateSchCache(r9,schedules,sPROCS+s1,sT,myPep)
+	List<Map> nSchs=sgtSch(r9)
+	// write back only when schedules were cancelled or added (saves a state write and cache update per event)
+	if(nSchs || schedules.size()!=oSz){
+		schedules=schedules+nSchs
+		updateSchCache(r9,schedules,sPROCS+s1,sT,myPep)
+	}
 
 	if(scheduleJob){
 		Long nextT=lZ
@@ -3777,80 +3857,100 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 		if(ssz>iZ){
 			Map tnext=schedules.min{ Map it -> lMt(it) }
 			nextT=lMt(tnext)
-			Long sVariance=lMs(gtPLimits(),sSCHVARIANCE)
 			Long t=nextT-wnow()
-			t=Math.max(t,sVariance)
-			wrunInMillis(t,sTIMHNDR,[(sDATA): tnext])
-			if(isInf(r9))info 'Setting up scheduled job for '+formatLocalTime(r9,nextT)+' (in '+t.toString()+'ms)'+(ssz>i1 ? ', with '+(ssz-i1).toString()+' more job'+(ssz>i2 ? sS:sBLK)+' pending':sBLK),r9
+			// sNSCH is reset to 0 whenever the hub job fires, is recovered or is unscheduled, so an equal value means
+			// the job is still armed for this time; re-arm anyway if overdue (e.g. its time event was dropped)
+			if(nextT!=lMs(r9,sNSCH) || t<=lZ){
+				t=Math.max(t,lMs(gtPLimits(),sSCHVARIANCE))
+				wrunInMillis(t,sTIMHNDR,[(sDATA): tnext])
+				if(isInf(r9))info 'Setting up scheduled job for '+formatLocalTime(r9,nextT)+' (in '+t.toString()+'ms)'+(ssz>i1 ? ', with '+(ssz-i1).toString()+' more job'+(ssz>i2 ? sS:sBLK)+' pending':sBLK),r9
+			}
 		}
 		if(nextT==lZ){
 			if(lMs(r9,sNSCH)!=lZ)wunschedule(sTIMHNDR)
 			clearReadFLDs(r9)
 		}
-		chgNextSch(r9,nextT)
+		if(nextT!=lMs(r9,sNSCH)) chgNextSch(r9,nextT)
+		else ((Map)r9[sSTATS])[sNSCH]=nextT
 	}
 	r9[sSCHS]=[]
 }
 
 @Field static final String sUPDL='updateLogs'
 /** store this run logs to persistent state and update caches */
+@CompileStatic
 private void updateLogs(Map r9,Long lastExecute=null){
 	if(!r9)return
+	String s=sLOGS
+	List rLogs=liMs(r9,s)
+	Boolean hasLogs= rLogs!=null && rLogs.size()>i1
+	r9[s]=[]
+	if(lastExecute==null && !hasLogs)return // nothing to store (logging off leaves only the run's timestamp entry)
 
 	String id=sMs(r9,snId)
+	Boolean myPep=isPep(r9)
+	Integer lim; lim=iMs(r9,sMLOGS)
+	List logs; logs=null
+	Boolean inC; inC=false
 
-	Map cacheMap=getCachedMaps(sUPDL)
+	// one lock for the cache read-modify-write; state writes are done after releasing it
 	getTheLock(id,sE)
-
-	Map nc=theCacheVFLD[id]
-
-	if(lastExecute!=null){
-		assignSt(sLEXEC,lastExecute)
-		if(nc && cacheMap!=null){
+	Map nc; nc=theCacheVFLD[id]
+	if(!(nc && nc[sCACHE] instanceof Map && nc[sBLD] instanceof Integer)){ // missing / invalid cache (rare): rebuild from state
+		releaseTheLock(id)
+		getCachedFields(sUPDL,lEMPTYS)
+		getTheLock(id,sE)
+		nc=theCacheVFLD[id]
+	}
+	if(nc && nc[sCACHE] instanceof Map && nc[sBLD] instanceof Integer){
+		inC=true
+		if(lastExecute!=null){
 			nc[sLEXEC]=lastExecute
 			nc[sTEMP]=[:]+mMs(r9,sTEMP)
 			nc[sPCACHE]=[:]+mMs(r9,sPCACHE)
-			theCacheVFLD[id]=nc
-			theCacheVFLD=theCacheVFLD
 		}
+		if(hasLogs){
+			logs=trimLogs(rLogs+((List)nc[s] ?: []),lim)
+			nc[s]=logs
+		}
+		theCacheVFLD[id]=nc
 	}
+	releaseTheLock(id)
 
-	String s=sLOGS
-	if(r9[s] && liMs(r9,s).size()>i1){
-		Boolean myPep=isPep(r9)
-		Integer lim=iMs(r9,sMLOGS)
-
-		List t0
-		if(cacheMap!=null)t0=[]+(List)cacheMap[s]
-		else t0=(myPep ? (List)gtAS(s):(List)gtSt(s)) ?: []
-		List logs
-		logs=[]+(List)r9[s]+t0
-		if(lim>=iZ){
-			Integer lsz; lsz=logs.size()
-			if(lim==iZ || lsz==iZ)logs=[]
-			else{
-				if(lim< lsz-i1){
-					logs=logs[iZ..<lim]
-					lsz=logs.size()
-				}
-				if(lsz>i50){
-					assignSt(s,logs) //	this mixes state and AS
-					if(state.toString().length()>75000){
-						lim-=Math.min(i50,(lim/d2).toInteger())
-						logs=logs[iZ..<lim]
+	if(lastExecute!=null) assignSt(sLEXEC,lastExecute)
+	if(hasLogs){
+		if(!inC) logs=trimLogs(rLogs+((myPep ? (List)gtAS(s):(List)gtSt(s)) ?: []),lim)
+		Integer lsz=logs.size()
+		if(lim>iZ && lsz>i50){
+			assignSt(s,logs) //	this mixes state and AS
+			// full state serialization only when a recent measurement is missing or near the limit
+			Integer sb; sb=stateBytes(lSTSIZEW)
+			if(sb>60000)sb=stateBytes()
+			if(sb>75000){
+				lim-=Math.min(i50,(lim/d2).toInteger())
+				logs=logs[iZ..<lim]
+				if(inC){ // rare: store the shorter list in the cache too
+					getTheLock(id,sE)
+					nc=theCacheVFLD[id]
+					if(nc){
+						nc[s]=logs
+						theCacheVFLD[id]=nc
 					}
+					releaseTheLock(id)
 				}
 			}
 		}
 		if(myPep)assignAS(s,logs) else assignSt(s,logs)
-		if(nc && cacheMap!=null){
-			nc[s]=logs
-			theCacheVFLD[id]=nc
-			theCacheVFLD=theCacheVFLD
-		}
 	}
-	r9[s]=[]
-	releaseTheLock(id)
+}
+
+/** newest first list limited to lim entries (lim<0: no limit; lim==0: none) */
+@CompileStatic
+private static List trimLogs(List logs,Integer lim){
+	if(lim<iZ)return logs
+	Integer lsz=logs.size()
+	if(lim==iZ || lsz==iZ)return []
+	return lim<lsz-i1 ? logs[iZ..<lim] : logs
 }
 
 @CompileStatic
@@ -3981,10 +4081,11 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 	Boolean myPep=isPep(r9)
 	List<Map> r=liMs(statement,sR)
 	Boolean allowed; allowed=true
+	Map evSch; evSch=null // EVERY: existing schedule found by scheduleTimer
 	if(stateType!=sEVERY)
 		allowed=!r || r.size()==iZ || evaluateConditions(r9,statement,sR,async)
 	if(allowed || ffwd(r9)){
-		String evntName; evntName=sMs(mMs(r9,sEVENT),sNM)
+		String evntName // only used by ON (from the current event); EVERY reads the event itself
 		Boolean perform,repeat,isIf,isEach
 		perform=false
 		repeat=true
@@ -4063,15 +4164,16 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 					break
 				case sEVERY:
 					//only execute the every if i=-1 (for rapid timers with large restrictions i.e. every second, but only on Mondays)
-					Map es=mMs(mMs(r9,sEVENT),sSCH)
-					Boolean ownEvent=evntName==sTIME && es!=null && iMsS(es)==stmtNm && iMs(es,sI)==iN1
+					Map ev=mMs(r9,sEVENT)
+					Map es=mMs(ev,sSCH)
+					Boolean ownEvent=sMs(ev,sNM)==sTIME && es!=null && iMsS(es)==stmtNm && iMs(es,sI)==iN1
 					if(ownEvent){
 						chgRun(r9,iZ)
 						allowed=!r || r.size()==iZ || evaluateConditions(r9,statement,sR,async)
 					}
 
 					//ensure every timer is scheduled
-					scheduleTimer(r9,statement,ownEvent ? lMt(es):lZ,myPep)
+					evSch=scheduleTimer(r9,statement,ownEvent ? lMt(es):lZ,myPep)
 
 					if(ffwd(r9) || ownEvent){
 						Boolean canR=ownEvent && allowed && !bIs(r9,sRESTRICD) // honor restrictions
@@ -4113,11 +4215,16 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 						if(evts){
 							for(Map event in evts){
 								Map operand=(Map)event?.lo
-								if(operand!=null && sMt(operand)){
-									switch(sMt(operand)){
+								String oMt= operand!=null ? sMt(operand) : sNL
+								if(oMt){
+									switch(oMt){
 										case sP:
-											if(deviceId!=sNL && evntName==sMa(operand) && liMd(operand) && deviceId in expandDeviceList(r9,liMd(operand),true))
-												perform=true
+											List<String> devs= deviceId!=sNL && evntName==sMa(operand) ? liMd(operand) : null
+											if(devs){
+												// literal device ids match directly; expand only when the list holds variables
+												if(deviceId in devs || (devs.any{ String d -> !isWcDev(d) } && deviceId in expandDeviceList(r9,devs)))
+													perform=true
+											}
 											break
 										case sV:
 											if(evntName==sMv(operand))
@@ -4307,12 +4414,13 @@ private Boolean executeStatement(Map r9,Map statement,Boolean asynch=false){
 	Map sch;sch=null
 	if(stateType==sEVERY){
 		sch=sgtSch(r9).find{ Map it -> iMsS(it)==stmtNm}
+		if(sch==null) sch=evSch // saved schedule already found by scheduleTimer; no second read
 		if(sch==null){
 			List<Map> schs=sgetSchedules(sEXST+s1,myPep)
 			sch=schs.find{ Map it -> iMsS(it)==stmtNm }
 		}
 	}
-	String myS="s:${stmtNm}".toString()
+	String myS='s:'+stmtNm.toString()
 	Long myL=elapseT(t)
 	if(sch!=null){ //timers need to show the remaining time
 		Long v=elapseT(lMt(sch))
@@ -4354,7 +4462,8 @@ private Long checkForSlowdown(Map r9){
 //	t2=t2!=null ? t2: lZ
 	Long t1= lMs(gtPLimits(),sSHLIMTIME)
 	Long t0= lMs(r9,sLSTPAUSE)
-	Long overby= t0==null || (wnow()-t0)>t1 ? elapseT(lMs(r9,sTMSTMP))-t2-t1 : lZ
+	Long n=wnow() // one clock read
+	Long overby= t0==null || (n-t0)>t1 ? elapseT(lMs(r9,sTMSTMP),n)-t2-t1 : lZ
 	return overby>lZ ? overby:lZ
 }
 
@@ -4371,6 +4480,7 @@ private void doPause(String mstr,Long delay,Map r9,Boolean ign=false){
 		t0=wnow()
 		Long mdel= delay>25L ? delay-25L : delay
 		wpauseExecution(mdel)
+		r9.remove(sATTRMEMO) // devices may have changed while paused
 
 		t1=wnow()
 		actDelay=t1-t0
@@ -4488,9 +4598,8 @@ private Boolean executeTask(Map r9,List devices,Map statement,Map task,Boolean a
 
 	// the command r: is replaced with command c.
 	//handle duplicate command "push" which was replaced with fake command "pushMomentary"
-	Map.Entry<String,Map> override=CommandsOverrides.find{ (String)it.value.r==tskC }
-	String command=override ? sMs(override.value,sC):tskC
-	if(override && lg)debug "Overriding command ${tskC} with ${command}",r9
+	String command=CommandsOverridesR[tskC] ?: tskC
+	if(lg && command!=tskC)debug "Overriding command ${tskC} with ${command}",r9
 
 	//parse parameter
 	List prms=[]
@@ -4528,7 +4637,7 @@ private Boolean executeTask(Map r9,List devices,Map statement,Map task,Boolean a
 
 	def virtualDevice=devices.size()!=iZ ? null:gtLocation()
 	for(device in (virtualDevice!=null ? [virtualDevice]:devices)){
-		if(virtualDevice==null && wdeviceHascommand(device as DeviceWrapper,command) && !voverride){
+		if(virtualDevice==null && !voverride && wdeviceHascommand(device as DeviceWrapper,command)){
 			if(command in LWCMDS){ // device commands with added parameters by webCoRE (have cmd_ wrapper (11))
 				Boolean doL= isInf(r9) && !isTrc(r9)
 				Map msg; msg=null
@@ -4580,23 +4689,39 @@ private Boolean executeTask(Map r9,List devices,Map statement,Map task,Boolean a
 }
 
 Long callCmdWrap(Map r9,device,List prms,String command){
+	// direct calls for the common virtual commands (avoids GString + dynamic method lookup); others by name
+	switch(command){
+		case 'vcmd_setVariable': return vcmd_setVariable(r9,device,prms)
+		case 'vcmd_wait': return vcmd_wait(r9,device,prms)
+		case 'vcmd_waitRandom': return vcmd_waitRandom(r9,device,prms)
+		case 'vcmd_log': return vcmd_log(r9,device,prms)
+		case 'vcmd_setState': return vcmd_setState(r9,device,prms)
+		case 'vcmd_executePiston': return vcmd_executePiston(r9,device,prms)
+		case 'vcmd_setLocationMode': return vcmd_setLocationMode(r9,device,prms)
+		case 'vcmd_setSwitch': return vcmd_setSwitch(r9,device,prms)
+		case 'vcmd_toggle': return vcmd_toggle(r9,device,prms)
+		case 'vcmd_httpRequest': return vcmd_httpRequest(r9,device,prms)
+		case 'vcmd_cancelTasks': return vcmd_cancelTasks(r9,device,prms)
+		case 'vcmd_noop': return vcmd_noop(r9,device,prms)
+	}
 	return (Long)"${command}"(r9,device,prms)
 }
 
 private Long executeVirtualCommand(Map r9,devices,String command,List prms){
-	Map msg=timer "Executed virtual command ${devices ? (devices instanceof List ? "$devices.":"[$devices]."):sBLK}${command}",r9
+	Boolean inf=isInf(r9)
+	// timer() starts the timing, so it must run before the command; its message is only built when it will be logged
+	Map msg= inf ? timer("Executed virtual command ${devices ? (devices instanceof List ? "$devices.":"[$devices]."):sBLK}${command}".toString(),r9) : null
 	Long delay
 	try{
 		delay=callCmdWrap(r9,devices,prms,'vcmd_'+command)
-		if(isInf(r9)){
+		if(inf){
 			if(command.contains('wait')) msg[sM]+=" $prms"
 			if(isTrc(r9))trace msg,r9
 			else if(delay>lZ)info msg,r9
 		}
-
 	}catch(all){
-		msg[sM]="Error executing virtual command ${devices instanceof List ? "$devices":"[$devices]"}.${command}:"
-		error msg,r9,iN2,all
+		// msg is null when not logging at info; always report the original error
+		error "Error executing virtual command ${devices instanceof List ? "$devices":"[$devices]"}.${command}:".toString(),r9,iN2,all
 		delay=lZ
 	}
 	return delay
@@ -4618,14 +4743,18 @@ private static Integer svPS(Map statement){ return gTCP(statement) in ListBP ? i
 
 @CompileStatic
 private static Long cedIs(Map r9){
+	Long v=(Long)r9[sCEDV] // piston option + limit: same for the whole run
+	if(v!=null)return v
 	Integer a=gtPOpt(r9,sCED) // command execution delay
 	Long ced; ced= a ? a.toLong():lZ
 	if(ced>lZ){
 		Long t1=lMs(gtPLimits(),sDEVMAXDEL)
 		ced=Math.min(ced,t1)
 	}
+	r9[sCEDV]=ced
 	return ced
 }
+@Field static final String sCEDV='cedV' // r9: cached cedIs result for this run
 
 @CompileStatic
 private String gtSwitch(Map r9,device){ return (String)getDeviceAttributeValue(r9,device,sSWITCH) }
@@ -4699,11 +4828,14 @@ private void executePhysicalCommand(Map r9,device,String command,prms=[],Long id
 		}
 		spshSch(r9,schedule)
 	}else{
-		List nprms=(prms instanceof List) ? (List)prms:(prms!=null ? [prms]:[])
+		List nprms; nprms=(prms instanceof List) ? (List)prms:(prms!=null ? [prms]:[])
 		try{
-			//cleanup the prms so that SONOS works
+			//cleanup the prms so that SONOS works; trim a copy, never the caller's list
 			Integer psz; psz=nprms.size()
-			while (psz>iZ && nprms[psz-i1]==null){ nprms.pop(); psz=nprms.size() }
+			if(psz>iZ && nprms[psz-i1]==null){
+				while(psz>iZ && nprms[psz-i1]==null) psz--
+				nprms= psz>iZ ? new ArrayList(nprms.subList(iZ,psz)) : []
+			}
 
 			String tailStr; tailStr=sNL
 			if(!canq && delay>lZ){
@@ -4716,21 +4848,29 @@ private void executePhysicalCommand(Map r9,device,String command,prms=[],Long id
 			if(doI)msg=timer sBLK,r9
 
 			Boolean skip; skip=false
+			// looked up once: used by command optimization and by recordCmd
+			Map<String,Map> pcs=PhysicalCommands()
+			Map cmd= pcs!=null ? pcs[command]:null
+			String dKey=ldgDevId(device)
 			// disableCommandOptimization
 			// [sSTCLRTEMP,sSTCLR,sSTHUE,sSTSATUR,sPUSH,sRELEASE,sHOLD,sDOUBLETAP] // commands that do not allow command optimization
 			if(!gtPOpt(r9,sDCO) && !dco && !(command in ListDCO)){
-				Map cmd=PhysicalCommands()[command]
 				if(cmd!=null && sMa(cmd)!=sNL){
 					String attr= sMa(cmd)
 					Map attribute= Attributes()[attr]
 					if( attribute==null || attribute[sM]==null || !bIs(attribute,sM) ){ // not momentary attribute
+						// read live device state (skipCurEvt), not the triggering event's value: this piston may have
+						// changed the device since. Also require the command ledger to agree, as the device may not
+						// have reported commands this piston sent recently.
 						if(oMv(cmd)!=null && psz==iZ) {
 							//commands with no parameter that set an attribute to a preset value
-							if ((String)getDeviceAttributeValue(r9,device,attr) == sMv(cmd))
+							String tv=sMv(cmd)
+							if ((String)getDeviceAttributeValue(r9,device,attr,true) == tv && ldgAllows(dKey,attr,tv))
 								skip= true
 						} else if(psz==i1) {
-							if(getDeviceAttributeValue(r9,device,attr) == nprms[iZ])
-								skip= (command in ListSLVLSIFLVL ? gtSwitch(r9,device)==sON : true)
+							if(getDeviceAttributeValue(r9,device,attr,true) == nprms[iZ] && ldgAllows(dKey,attr,String.valueOf(nprms[iZ])))
+								skip= (command in ListSLVLSIFLVL ?
+									((String)getDeviceAttributeValue(r9,device,sSWITCH,true)==sON && ldgAllows(dKey,sSWITCH,sON)) : true)
 						}
 					}
 				}
@@ -4746,6 +4886,7 @@ private void executePhysicalCommand(Map r9,device,String command,prms=[],Long id
 			}
 			if(!skip){
 				if(ced)r9[sLSTPCSNT]=wnow()
+				recordCmd(r9,dKey,command,nprms,cmd)
 				pcmd(device,command,nprms)
 			}
 			if(doL)trace msg,r9
@@ -4754,6 +4895,66 @@ private void executePhysicalCommand(Map r9,device,String command,prms=[],Long id
 			error "Error while executing device command $device.$command($nprms):",r9,iN2,all
 		}
 	}
+}
+
+@Field static final String sLDGDIRTY='*'
+@Field static final String sATTRMEMO='attrMemo' // r9: per-run device attribute read memo, deviceId -> (attr -> value)
+@Field static final Long lCMDLDGW=10000L // how long a sent command can veto optimization (device report latency)
+
+/**
+ * Hub-wide command ledger, shared by all pistons: device commands sent recently whose effect the
+ * device may not have reported yet.
+ * key: deviceId+':'+attr -> [v: expected value as String (null = unknown), t: time sent]
+ *      deviceId+'*'      -> [t: time sent] command with no known attribute mapping; device is "dirty"
+ * Entries are immutable maps, replaced (never mutated); expired entries are pruned on write.
+ * It can only prevent a skip, never cause one: skipping still requires the live device value to match.
+ * Commands from other apps / physical changes are not recorded; in-memory only (empty after reboot).
+ */
+@Field static final ConcurrentHashMap<String,Map> cmdLdgFLD=new ConcurrentHashMap<String,Map>()
+
+/** raw hub device id (not the per-parent hash) so all pistons share keys */
+private static String ldgDevId(device){ return device.id.toString() }
+
+/** dKey: ldgDevId(device); cmd: PhysicalCommands()[command] (both from executePhysicalCommand) */
+@CompileStatic
+private void recordCmd(Map r9,String dKey,String command,List nprms,Map cmd){
+	Map memo=(Map)r9[sATTRMEMO]
+	if(memo)memo.remove(sD+dKey) // device is changing; re-read it
+	Long t=wnow()
+	if(cmdLdgFLD.size()>100)pruneLdg(t)
+	String attr= cmd!=null ? sMa(cmd):sNL
+	if(attr==sNL){
+		cmdLdgFLD.put(dKey+sLDGDIRTY,[(sT):t] as Map)
+		return
+	}
+	Integer psz=nprms.size()
+	String v= oMv(cmd)!=null && psz==iZ ? sMv(cmd) : (psz==i1 ? String.valueOf(nprms[iZ]) : sNL)
+	cmdLdgFLD.put(dKey+sCLN+attr,[(sV):v,(sT):t] as Map)
+	// level commands may also switch the device on or off
+	if(command in ListSLVLSIFLVL) cmdLdgFLD.put(dKey+sCLN+sSWITCH,[(sV):sNL,(sT):t] as Map)
+}
+
+/** drop expired entries; ConcurrentHashMap iteration is weakly consistent, safe alongside writers */
+@CompileStatic
+private static void pruneLdg(Long now){
+	Long old=now-lCMDLDGW
+	for(Map.Entry<String,Map> it in cmdLdgFLD.entrySet()){
+		if(lMt(it.value)<=old)cmdLdgFLD.remove(it.key,it.value) // only if not replaced meanwhile
+	}
+}
+
+/** true if no recent command from any piston contradicts attr being at target */
+/** dKey: ldgDevId(device) */
+@CompileStatic
+private Boolean ldgAllows(String dKey,String attr,String target){
+	if(cmdLdgFLD.isEmpty())return true
+	Long old=wnow()-lCMDLDGW
+	Map d=cmdLdgFLD.get(dKey+sLDGDIRTY)
+	if(d!=null && lMt(d)>old)return false
+	Map e=cmdLdgFLD.get(dKey+sCLN+attr)
+	if(e==null || lMt(e)<=old)return true
+	String v=sMv(e)
+	return v!=sNL && v==target
 }
 
 private static void pcmd(device,String cmd,List nprms=[]){
@@ -4772,7 +4973,8 @@ private static void pcmd(device,String cmd,List nprms=[]){
  * schedule EVERY timer
  */
 @CompileStatic
-private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
+/** returns the existing schedule of this timer when one was found (nothing new requested), else null */
+private Map scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	Boolean lg=isDbg(r9)
 	Boolean lgt=isTrc(r9)
 	Boolean lge=lg && isEric(r9)
@@ -4785,12 +4987,12 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 		mySt="stmt: ${iTD} lo:${tlo} lo2: ${tlo2} lo3: ${tlo3} lastRun: $lastRun "
 
 	//if already scheduled once during run, don't do it again
-	List<Map> schedules=sgetSchedules(sEXST,myPep)
-	Boolean fnd=schedules.find{ Map it -> iMsS(it)==iTD } != null ||
-			sgtSch(r9).find{ Map it -> iMsS(it)==iTD } != null
-	if(fnd){
+	// new schedules of this run (in memory) first; saved schedules (lock + copy) only if not found there
+	Map fnd; fnd=sgtSch(r9).find{ Map it -> iMsS(it)==iTD }
+	if(fnd==null) fnd=sgetSchedules(sEXST,myPep).find{ Map it -> iMsS(it)==iTD }
+	if(fnd!=null){
 		if(lge) myDetail r9,mySt1+'FOUND EXISTING TIMER '+mySt,iN2
-		return
+		return fnd
 	}
 	if(lge) myDetail r9,mySt1+mySt,i1
 	//complicated stuff follows
@@ -4806,7 +5008,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 	}else exitOut=true
 	if(exitOut){
 		if(lge)myDetail r9,mySt1+mySt+"Interval: $tinterval"
-		return
+		return null
 	}
 	Integer interval=tintvl
 	String intervlUnit=sMvt(tlo)
@@ -5000,6 +5202,7 @@ private void scheduleTimer(Map r9,Map timer,Long lastRun=lZ,Boolean myPep){
 		requestWakeUp(r9,timer,[(sDLR):iN1],nxtSchd,sNL,false,sNL,msg)
 	}
 	if(lge)myDetail r9,mySt1+mySt
+	return null // a new schedule (if any) is in this run's in-memory schedules
 }
 
 /**
@@ -5250,10 +5453,8 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 	Integer dyHr= zdt.getHour()
 	Integer dyMins= zdt.getMinute()
 
-	Double dminDay=1440.0D
 	Double dsecDay=86400.0D
 
-	Long res; res= -l1
 	//month restrictions
 	Integer dyMonPlus=dyMon+i1
 	if(omy!=null && omy.indexOf(dyMonPlus)<iZ){
@@ -5262,37 +5463,14 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 		month=(tI.find{ Integer it -> it>dyMonPlus } ?: i12+tI[iZ]) -i1
 		Integer year=dyYear+(month>=i12 ? i1:iZ)
 		month=(month>=i12 ? month-i12:month)
-		nzdt= zdt.withYear(year+i1900)
-		nzdt= nzdt.withMonth(month+i1)
-		nzdt= nzdt.withDayOfMonth(i1)
-		Long ms= nzdt.toInstant().toEpochMilli()-time
-		switch(level){
-			case i2: //by second
-				Double tt=Math.floor((ms/(d1000*interval)).toDouble())
-				res=Math.round(interval*(tt-d2)*d1000)
-				break
-			case i3: //by minute
-				Double tt=Math.floor((ms/(dMSMINT*interval)).toDouble())
-				res=Math.round(interval*(tt-d2)*dMSMINT)
-				break
-		}
-		return pRes(res)
+		nzdt= zdt.withYear(year+i1900).withMonth(month+i1).withDayOfMonth(i1)
+		return ffRes((nzdt.toInstant().toEpochMilli()-time)/d1000,level,interval)
 	}
 
 	Double d7=7.0D
 	//week of month restrictions
 	if(owm!=null && !(owm.indexOf(getWeekOfMonth(zdt))>=iZ || owm.indexOf(getWeekOfMonth(zdt,true))>=iZ)){
-		switch(level){
-			case i2: //by second
-				Double tt= Math.floor( ( ( (d7-dyDay)*dsecDay -dyHr*dSECHR -dyMins*d60)/interval ).toDouble() )
-				res=Math.round(interval*(tt-d2)*d1000)
-				break
-			case i3: //by minute
-				Double tt= Math.floor( ( ( (d7-dyDay)*dminDay -dyHr*d60 -dyMins)/interval).toDouble() )
-				res=Math.round(interval*(tt-d2)*dMSMINT)
-				break
-		}
-		return pRes(res)
+		return ffRes((d7-dyDay)*dsecDay -dyHr*dSECHR -dyMins*d60,level,interval)
 	}
 
 	//day of month restrictions
@@ -5308,50 +5486,19 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 			odm.removeAll{ Integer it -> it<1 }
 		}
 		List<Integer> tI=odm.sort{ Integer it -> it }
-		switch(level){
-			case i2: //by second
-				Double tt= Math.floor( ((((tI.find{ Integer it -> it>dyDate } ?: lastDayOfMonth+tI[iZ])-dyDate)*dsecDay-dyHr*dSECHR-dyMins*d60)/interval).toDouble() )
-				res=Math.round(interval*(tt-d2)*d1000)
-				break
-			case i3: //by minute
-				Double tt= Math.floor(((((tI.find{ Integer it -> it>dyDate } ?: lastDayOfMonth+tI[iZ])-dyDate)*dminDay-dyHr*d60-dyMins)/interval).toDouble())
-				res=Math.round(interval*(tt-d2)*dMSMINT)
-				break
-		}
-		return pRes(res)
+		return ffRes(((tI.find{ Integer it -> it>dyDate } ?: lastDayOfMonth+tI[iZ])-dyDate)*dsecDay-dyHr*dSECHR-dyMins*d60,level,interval)
 	}
 
 	//day of week restrictions
 	if(odw!=null && odw.indexOf(dyDay)<iZ ){
 		List<Integer> tI=odw.sort{ Integer it -> it }
-		switch(level){
-			case i2: //by second
-				Double tt= Math.floor(((((tI.find{ Integer it -> it>dyDay } ?: d7+tI[iZ])-dyDay)*dsecDay-dyHr*dSECHR-dyMins*d60)/interval).toDouble())
-				res=Math.round(interval*(tt-d2)*d1000)
-				break
-			case i3: //by minute
-				Double tt= Math.floor(((((tI.find{ Integer it -> it>dyDay } ?: d7+tI[iZ])-dyDay)*dminDay-dyHr*d60-dyMins)/interval).toDouble())
-				res=Math.round(interval*(tt-d2)*dMSMINT)
-				break
-		}
-		return pRes(res)
+		return ffRes(((tI.find{ Integer it -> it>dyDay } ?: d7+tI[iZ])-dyDay)*dsecDay-dyHr*dSECHR-dyMins*d60,level,interval)
 	}
 
 	//hour restrictions
 	if(oh!=null && oh.indexOf(dyHr)<iZ ){
-		Double d24=24.0D
 		List<Integer> tI=oh.sort{ Integer it -> it }
-		switch(level){
-			case i2: //by second
-				Double tt= Math.floor(((((tI.find{ Integer it -> it>dyHr } ?: d24+tI[iZ])-dyHr)*dSECHR-dyMins*d60)/interval).toDouble())
-				res=Math.round(interval*(tt-d2)*d1000)
-				break
-			case i3: //by minute
-				Double tt= Math.floor(((((tI.find{ Integer it -> it>dyHr } ?: d24+tI[iZ])-dyHr)*d60-dyMins)/interval).toDouble())
-				res=Math.round(interval*(tt-d2)*dMSMINT)
-				break
-		}
-		return pRes(res)
+		return ffRes(((tI.find{ Integer it -> it>dyHr } ?: 24.0D+tI[iZ])-dyHr)*dSECHR-dyMins*d60,level,interval)
 	}
 
 	//minute restrictions
@@ -5360,10 +5507,20 @@ private Long checkTimeRestrictions(Map r9,Map operand,Long time,Integer level,In
 		//suggest an offset to reach the next minute
 		List<Integer> tI=om.sort{ Integer it -> it }
 		Double tt= Math.floor((((tI.find{ Integer it -> it>dyMins } ?: d60+tI[iZ])-dyMins-d1)*d60/interval).toDouble())
-		res=Math.round(interval*(tt-d2)*d1000)
-		return pRes(res)
+		return pRes(Math.round(interval*(tt-d2)*d1000))
 	}
 	return lZ
+}
+
+/** fast forward offset (ms) from secs until the next allowed period: level 2 by second, 3 by minute; otherwise -1 */
+@CompileStatic
+private static Long ffRes(Number nsecs,Integer level,Integer interval){
+	Double secs=nsecs.toDouble()
+	switch(level){
+		case i2: return pRes(Math.round(interval*(Math.floor((secs/interval).toDouble())-d2)*d1000))
+		case i3: return pRes(Math.round(interval*(Math.floor((secs/d60/interval).toDouble())-d2)*dMSMINT))
+	}
+	return -l1
 }
 
 /** return r if r>0, otherwise -1 */
@@ -5556,20 +5713,14 @@ private Long cmd_setAdjustedHSLColor(Map r9,device,List prms){
 	Integer psz=prms.size()
 	String mat=psz>i4 ? sLi(prms,i4):sNL
 	if(ntMatSw(r9,mat,device,'setAdjustedHSLColor'))return lZ
-
-	Long duration=matchCastL(r9,prms[i3])
-	Integer hue=wcHue2DevHue(iLi(prms,iZ))
-	Integer saturation=iLi(prms,i1)
-	Integer level=iLi(prms,i2)
-	Map color=[
-		(sHUE):hue,
-		(sSATUR):saturation,
-		(sLVL):level
-	]
 	Long delay=psz>i5 ? (Long)prms[i5]:lZ
-	executePhysicalCommand(r9,device,'setAdjustedColor',[color,duration],delay)
-	if(delay>=lZ)return delay
-	return lZ
+	executePhysicalCommand(r9,device,'setAdjustedColor',[hslMap(prms),matchCastL(r9,prms[i3])],delay)
+	return delay>=lZ ? delay:lZ
+}
+
+/** device color map from prms hue (webCoRE 0-360), saturation, level */
+private static Map hslMap(List prms){
+	return [(sHUE):wcHue2DevHue(iLi(prms,iZ)), (sSATUR):iLi(prms,i1), (sLVL):iLi(prms,i2)]
 }
 
 private Long cmd_setLoopDuration(Map r9,device,List prms){
@@ -5609,14 +5760,22 @@ private Long vcmd_setState(Map r9,device,List prms){
 }
 
 private static Long vcmd_setTileColor(Map r9,device,List prms){
-	Integer index=matchCastI(r9,prms[iZ])
-	if(index<i1 || index>i16)return lZ
-	String sIdx=index.toString()
-	Map t0=mMs(r9,sST)
-	t0[sC+sIdx]=(String)gtColor((String)prms[i1])?.hex
-	t0[sB+sIdx]=(String)gtColor((String)prms[i2])?.hex
-	t0[sF+sIdx]=!!prms[i3]
+	String sIdx=tileIdx(r9,prms)
+	if(sIdx)tileClr(mMs(r9,sST),sIdx,prms,i1)
 	return lZ
+}
+
+/** tile index 1-16 from prms[0] as String, or null if out of range */
+private static String tileIdx(Map r9,List prms){
+	Integer index=matchCastI(r9,prms[iZ])
+	return index<i1 || index>i16 ? sNL : index.toString()
+}
+
+/** set tile color, background, flash from prms[i..i+2] */
+private static void tileClr(Map t0,String sIdx,List prms,Integer i){
+	t0[sC+sIdx]=(String)gtColor(sLi(prms,i))?.hex
+	t0[sB+sIdx]=(String)gtColor(sLi(prms,i+i1))?.hex
+	t0[sF+sIdx]=!!prms[i+i2]
 }
 
 private static Long vcmd_setTileTitle(Map r9,device,List prms){ return helper_setTile(r9,sI,prms) }
@@ -5628,42 +5787,32 @@ private static Long vcmd_setTileFooter(Map r9,device,List prms){ return helper_s
 private static Long vcmd_setTileOTitle(Map r9,device,List prms){ return helper_setTile(r9,sP,prms) }
 
 private static Long helper_setTile(Map r9,String typ,List prms){
-	Integer index=matchCastI(r9,prms[iZ])
-	if(index<i1 || index>i16)return lZ
-	r9[sST]["${typ}$index".toString()]=sLi(prms,i1)
+	String sIdx=tileIdx(r9,prms)
+	if(sIdx)mMs(r9,sST)[typ+sIdx]=sLi(prms,i1)
 	return lZ
 }
 
 private static Long vcmd_setTile(Map r9,device,List prms){
-	Integer index=matchCastI(r9,prms[iZ])
-	if(index<i1 || index>i16)return lZ
-	String sIdx=index.toString()
-	Map t0=mMs(r9,sST)
-	t0[sI+sIdx]=sLi(prms,i1)
-	t0[sT+sIdx]=sLi(prms,i2)
-	t0[sO+sIdx]=sLi(prms,i3)
-	t0[sC+sIdx]=(String)gtColor(sLi(prms,i4))?.hex
-	t0[sB+sIdx]=(String)gtColor(sLi(prms,i5))?.hex
-	t0[sF+sIdx]=!!prms[i6]
+	String sIdx=tileIdx(r9,prms)
+	if(sIdx){
+		Map t0=mMs(r9,sST)
+		t0[sI+sIdx]=sLi(prms,i1)
+		t0[sT+sIdx]=sLi(prms,i2)
+		t0[sO+sIdx]=sLi(prms,i3)
+		tileClr(t0,sIdx,prms,i4)
+	}
 	return lZ
 }
 
 private static Long vcmd_clearTile(Map r9,device,List prms){
-	Integer index=matchCastI(r9,prms[iZ])
-	if(index<i1 || index>i16)return lZ
-	String sIdx=index.toString()
-	Map t0=mMs(r9,sST)
-	t0.remove(sI+sIdx)
-	t0.remove(sT+sIdx)
-	t0.remove(sC+sIdx)
-	t0.remove(sO+sIdx)
-	t0.remove(sB+sIdx)
-	t0.remove(sF+sIdx)
-	t0.remove(sP+sIdx)
+	String sIdx=tileIdx(r9,prms)
+	if(sIdx){
+		Map t0=mMs(r9,sST)
+		for(String k in [sI,sT,sC,sO,sB,sF,sP]) t0.remove(k+sIdx)
+	}
 	return lZ
 }
 
-/* wrappers */
 private Long vcmd_setLocationMode(Map r9,device,List prms){
 	String mIdOrNm=sLi(prms,iZ)
 	Map mode=fndMode(r9,mIdOrNm)
@@ -5917,29 +6066,9 @@ private Long vcmd_internal_fade(Map r9,device,String command,Integer startLevel,
 		steps=Math.floor((d1*duration/minInterval).toDouble()).toInteger()
 		interval=Math.round((d1*duration/steps).toDouble())
 	}
-	String scheduleDevice=hashD(r9,device)
 	executePhysicalCommand(r9,device,command,startLevel)
-	Map jq=fillJQ(
-		i1,
-		steps,
-		command,
-		startLevel,
-		(delta*d1/steps).toDouble(),
-		interval,
-		interval,
-		sNL,
-		null,
-		lZ,
-		scheduleDevice,
-		command,
-		endLevel,
-		l500,
-		sNL,
-		null,
-		lZ
-	)
-	Long wt=stRepeat(r9,jq)
-	return wt+750L
+	return stRepeat(r9,fillJQ(i1,steps,command,startLevel,(delta*d1/steps).toDouble(),interval,interval,sNL,
+		null,lZ,hashD(r9,device),command,endLevel,l500,sNL,null,lZ))
 }
 
 private Long vcmd_emulatedFlash(Map r9,device,List prms){ vcmd_flash(r9,device,prms) }
@@ -5984,31 +6113,11 @@ private Long vcmd_flash(Map r9,device,List prms){
 	Long firstDuration=firstOn ? onDuration:offDuration
 	String secondCommand=firstOn ? sOFF:sON
 	Long secondDuration=firstOn ? offDuration:onDuration
-	String scheduleDevice=hashD(r9,device)
-	Map jq=fillJQ(
-		i1,
-		cycles,
-		firstCmd,
-		null,
-		null,
-		lZ,
-		firstDuration,
-		secondCommand,
-		null,
-		secondDuration,
-		scheduleDevice,
-		currentState,
-		[],
-		l500,
-		sNL,
-		null,
-		lZ
-	)
-	Long wt=stRepeat(r9,jq)
-	return wt+750L
+	return stRepeat(r9,fillJQ(i1,cycles,firstCmd,null,null,lZ,firstDuration,secondCommand,
+		null,secondDuration,hashD(r9,device),currentState,[],l500,sNL,null,lZ))
 }
 
-/** return duration estimate */
+/** start the repeat job; return its duration estimate (+750ms margin) */
 @CompileStatic
 private Long stRepeat(Map r9,Map jq){
 	Integer start=iMsS(jq)
@@ -6034,7 +6143,7 @@ private Long stRepeat(Map r9,Map jq){
 	}
 	dur+=lMs(jq,'l1D')+lMs(jq,'l2D')
 	runRepeat(r9,jq)
-	return dur
+	return dur+750L
 }
 
 @CompileStatic
@@ -6132,28 +6241,8 @@ private Long vcmd_flashLevel(Map r9,device,List prms){
 	//if the flash is too fast, ignore it
 	if((duration1+duration2)<l500)return lZ
 	Integer currentLevel=(Integer)getDeviceAttributeValue(r9,device,sLVL)
-	String scheduleDevice=hashD(r9,device)
-	Map jq=fillJQ(
-		i1,
-		cycles,
-		sSTLVL,
-		[level1],
-		null,
-		lZ,
-		duration1,
-		sSTLVL,
-		[level2],
-		duration2,
-		scheduleDevice,
-		sSTLVL,
-		[currentLevel],
-		l500,
-		currentState,
-		[],
-		200L
-	)
-	Long wt=stRepeat(r9,jq)
-	return wt+750L
+	return stRepeat(r9,fillJQ(i1,cycles,sSTLVL,[level1],null,lZ,duration1,sSTLVL,
+		[level2],duration2,hashD(r9,device),sSTLVL,[currentLevel],l500,currentState,[],200L))
 }
 
 private Long vcmd_flashColor(Map r9,device,List prms){
@@ -6167,28 +6256,8 @@ private Long vcmd_flashColor(Map r9,device,List prms){
 	if(mat!=sNL && currentState!=mat)return lZ
 	//if the flash is too fast, ignore it
 	if((duration1+duration2)<l500)return lZ
-	String scheduleDevice=hashD(r9,device)
-	Map jq=fillJQ(
-		i1,
-		cycles,
-		sSTCLR,
-		[color1],
-		null,
-		lZ,
-		duration1,
-		sSTCLR,
-		[color2],
-		duration2,
-		scheduleDevice,
-		currentState,
-		[],
-		l500,
-		sNL,
-		[],
-		lZ
-	)
-	Long wt=stRepeat(r9,jq)
-	return wt+750L
+	return stRepeat(r9,fillJQ(i1,cycles,sSTCLR,[color1],null,lZ,duration1,sSTCLR,
+		[color2],duration2,hashD(r9,device),currentState,[],l500,sNL,[],lZ))
 }
 
 private Long vcmd_sendNotification(Map r9,device,List prms){
@@ -6277,60 +6346,36 @@ private Long vcmd_resumePiston(Map r9,device,List prms){
 }
 
 /* wrappers */
+@Field static final Map<String,String> mRULEACT=['Run':'runRuleAct','Stop':'stopRuleAct','Pause':'pauseRule','Resume':'resumeRule',
+	'Evaluate':'runRule','Set Boolean True':'setRuleBooleanTrue','Set Boolean False':'setRuleBooleanFalse']
+
 private Long vcmd_executeRule(Map r9,device,List prms){
 	String ruleId=sLi(prms,iZ)
 	String action=sLi(prms,i1)
-	//Boolean wait=(prms.size()>i2)? bcast(r9,prms[i2]):false
-	String ruleAction
-	ruleAction=sNL
-	if(action=="Run")ruleAction="runRuleAct"
-	if(action=="Stop")ruleAction="stopRuleAct"
-	if(action=="Pause")ruleAction="pauseRule"
-	if(action=="Resume")ruleAction="resumeRule"
-	if(action=="Evaluate")ruleAction="runRule"
-	if(action=="Set Boolean True")ruleAction="setRuleBooleanTrue"
-	if(action=="Set Boolean False")ruleAction="setRuleBooleanFalse"
-	if(!ruleAction){
-		String message="No Rule action found "+action
-		error message,r9
-	}else{
+	String ruleAction=mRULEACT[action]
+	if(!ruleAction) error "No Rule action found "+action,r9
+	else{
 		Boolean sent; sent=false
 		for(String ver in ['4.1','5.0']){
-			List<Map> rules=RMUtils.getRuleList(ver ?: sNL)
 			List myRule; myRule=[]
-			for(rule in rules){
-				List t0=rule.find{ hashId(r9,(String)it.key)==ruleId }.collect{(String)it.key}
-				myRule+=t0
-			}
+			for(rule in (List<Map>)RMUtils.getRuleList(ver)) myRule+=rule.find{ hashId(r9,(String)it.key)==ruleId }.collect{(String)it.key}
 			if(myRule){
-				RMUtils.sendAction(myRule,ruleAction,gtAppN(),ver ?: sNL)
+				RMUtils.sendAction(myRule,ruleAction,gtAppN(),ver)
 				sent=true
 			}
 		}
-		if(!sent){
-			String message="Rule not found "+ruleId
-			error message,r9
-		}
+		if(!sent) error "Rule not found "+ruleId,r9
 	}
 	return lZ
 }
 
 private Long vcmd_setHSLColor(Map r9,device,List prms){
-	Integer hue=wcHue2DevHue(iLi(prms,iZ))
-	Integer saturation=iLi(prms,i1)
-	Integer level=iLi(prms,i2)
-	Map color=[
-		(sHUE): hue,
-		(sSATUR): saturation,
-		(sLVL): level
-	]
 	Integer psz=prms.size()
 	String mat=psz>i3 ? sLi(prms,i3):sNL
 	if(ntMatSw(r9,mat,device,'setHSLColor'))return lZ
 	Long delay=psz>i4 ? (Long)prms[i4]:lZ
-	executePhysicalCommand(r9,device,sSTCLR,color,delay)
-	if(delay>=lZ)return delay
-	return lZ
+	executePhysicalCommand(r9,device,sSTCLR,hslMap(prms),delay)
+	return delay>=lZ ? delay:lZ
 }
 
 private Long vcmd_wolRequest(Map r9,device,List prms){
@@ -6530,43 +6575,22 @@ private Long vcmd_httpRequest(Map r9,device,List prms){
 	}
 	String reqCntntT=(method==sGET || reqBodyT=='FORM')? sAPPFORM : (reqBodyT=='JSON')? sAPPJSON:cntntT
 
-	String protocol,userPart,func
+	String protocol,userPart
 	protocol="https"
 	userPart=sBLK
-	String[] uriParts
 	String mat='://'
-	uriParts=uri.split(mat)
-	if(uriParts.size()>i2){
-		String s= uri.substring(iZ,uri.size()>i15 ? i15: uri.size())
-		if(!s.contains(mat)){
-			uriParts=[]
-			uriParts[iZ]=uri
-		}else{
-			List<String> s1; s1=[]
-			String[] n1; n1=[sA,sB]
-			Integer i
-			for(i=i1;i<uriParts.size();i++){
-				s1[i-i1]=uriParts[i]
-			}
-			n1[iZ]=uriParts[iZ]
-			n1[i1]=s1.join(mat)
-			uriParts=n1
-		}
-		if(isEric(r9))debug "found complex s: $s uri: $uri parts: $uriParts",r9
-
-		//warn "Invalid URI for web request:$uri",r9
-		//return lZ
-	}
-	if(uriParts.size()==i2){
-		//remove the httpX:// from the uri
-		protocol=uriParts[iZ].toLowerCase()
-		uri=uriParts[i1]
+	//remove the httpX:// from the uri; only near the start, as '://' may also appear in query parameters
+	Integer pi=uri.indexOf(mat)
+	if(pi>=iZ && pi+i3<=i15){
+		protocol=uri.substring(iZ,pi).toLowerCase()
+		uri=uri.substring(pi+i3)
 	}
 	//support for user:pass@IP (remove from URI for logging purposes, and other uri checks later)
-	if(uri.contains(sAT)){
-		String[] uriSubParts= uri.split(sAT as String)
-		userPart=uriSubParts[iZ]+sAT
-		uri=uriSubParts[i1]
+	Integer ai=uri.indexOf(sAT)
+	Integer si=uri.indexOf('/')
+	if(ai>=iZ && (si<iZ || ai<si)){
+		userPart=uri.substring(iZ,ai+i1)
+		uri=uri.substring(ai+i1)
 	}
 
 	Boolean internal; internal= uri.startsWith('10.') || uri.startsWith('192.168.')
@@ -6577,19 +6601,6 @@ private Long vcmd_httpRequest(Map r9,device,List prms){
 			internal=(bi>=i16 && bi<=31)
 		}
 	}
-/*
-	String[] split_path
-	split_path = uri.split('/')
-	uri = protocol+mat+userPart+split_path[iZ]
-	String path; path = '/'
-	Integer i
-	for(i=i1; i<split_path.size(); i++){
-		if(i>i1) path += '/'
-		path += split_path[i]
-	}
-	if(isEric(r9))debug "http uri: $uri",r9
-	if(isEric(r9))debug "http path: $path",r9
-*/
 	def data; data=null
 	if(reqBodyT=='CUSTOM' && !useQryS){
 		data=requestBody
@@ -6612,8 +6623,6 @@ private Long vcmd_httpRequest(Map r9,device,List prms){
 	try{
 		Map requestParams=[
 			uri: protocol+mat+userPart+uri,
-			//uri: uri,
-			//path: path,
 			query: useQryS ? data:null,
 			headers: headers,
 			(sCONTENTT): '*/*',
@@ -6623,24 +6632,7 @@ private Long vcmd_httpRequest(Map r9,device,List prms){
 			followRedirects: true,
 			timeout:i20
 		]
-		func=sBLK
-		switch(method){
-			case sGET:
-				func='asynchttpGet'
-				break
-			case 'POST':
-				func='asynchttpPost'
-				break
-			case 'PUT':
-				func='asynchttpPut'
-				break
-			case sDELETE:
-				func='asynchttpDelete'
-				break
-			case sHEAD:
-				func='asynchttpHead'
-				break
-		}
+		String func= method in [sGET,'POST','PUT',sDELETE,sHEAD] ? 'asynchttp'+method.substring(iZ,i1)+method.substring(i1).toLowerCase() : sBLK
 		if(isEric(r9))debug "http request $requestParams",r9
 		if(isDbg(r9))debug "Sending ${func} web request to: $uri",r9
 		if(func!=sBLK){
@@ -6807,10 +6799,11 @@ private Map securityLogin(String u, String p){
 }
 
 // used to avoid blowing stack
-@Field static Map<String,String> readTmpFLD=[:]
-@Field static Map<String,byte[]> readTmpBFLD=[:]
-@Field static Map<String,String> readDataFLD=[:]
-@Field static Map<String,List<Map>> fuelDataFLD=[:]
+// synchronized (not Concurrent) maps: these store null values
+@Field static final Map<String,String> readTmpFLD=Collections.synchronizedMap(new LinkedHashMap<String,String>())
+@Field static final Map<String,byte[]> readTmpBFLD=Collections.synchronizedMap(new LinkedHashMap<String,byte[]>())
+@Field static final Map<String,String> readDataFLD=Collections.synchronizedMap(new LinkedHashMap<String,String>())
+@Field static final Map<String,List<Map>> fuelDataFLD=Collections.synchronizedMap(new LinkedHashMap<String,List<Map>>())
 
 private static void clearReadFLDs(Map r9){
 	String pNm=sMs(r9,snId)
@@ -6818,7 +6811,14 @@ private static void clearReadFLDs(Map r9){
 	fuelDataFLD.put(pNm,[])
 }
 
-@Field static String minFwVersion="2.3.4.132"
+@Field static final String minFwVersion='2.3.4.132'
+
+Boolean fwOk(){
+	List<Integer> a=((String)gtLocation().hub.firmwareVersionString).tokenize(sDOT)*.toInteger()
+	List<Integer> b=minFwVersion.tokenize(sDOT)*.toInteger()
+	for(Integer i=iZ; i<Math.min(a.size(),b.size()); i++) if(a[i]!=b[i]) return a[i]>b[i]
+	return a.size()>=b.size()
+}
 
 private Boolean readFile(Map r9,List prms,Boolean data){
 	String name=sLi(prms,iZ)
@@ -6829,9 +6829,8 @@ private Boolean readFile(Map r9,List prms,Boolean data){
 	if(data)readDataFLD[pNm]=sBLK else readTmpFLD[pNm]=sBLK
 
 	Boolean res; res=false
-	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	try{
-		if(fwOk){
+		if(fwOk()){
 			readTmpBFLD[pNm]=null
 			readTmpBFLD[pNm]= (byte[])downloadHubFile(name)
 			if(readTmpBFLD[pNm].size()){
@@ -6926,10 +6925,9 @@ private Long vcmd_appendFile(Map r9,device,List prms){
 
 private Boolean fileExists(Map r9,String name){
 	Boolean res; res=false
-	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	String pNm=sMs(r9,snId)
 	try{
-		if(fwOk){
+		if(fwOk()){
 			readTmpBFLD[pNm]= (byte[])downloadHubFile(name)
 			res= true
 		}else{
@@ -6956,10 +6954,9 @@ private Boolean writeFile(Map r9,List prms){
 	//String pass=sLi(prms,i3)
 
 	String pNm=sMs(r9,snId)
-	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	Boolean res; res=false
 	try{
-		if(fwOk){
+		if(fwOk()){
 			readTmpBFLD[pNm]= sLi(prms,i1).getBytes()
 			uploadHubFile(name, readTmpBFLD[pNm])
 			readTmpBFLD[pNm]=null
@@ -7012,10 +7009,9 @@ private Long vcmd_writeFile(Map r9,device,List prms){
 private Boolean deleteFile(Map r9,List prms){
 	String fName= sLi(prms,iZ)
 
-	Boolean fwOk= ((String)gtLocation().hub.firmwareVersionString >= minFwVersion)
 	Boolean res; res=false
 	try{
-		if(fwOk){
+		if(fwOk()){
 			deleteHubFile(fName)
 			res=true
 		}else{
@@ -7167,9 +7163,19 @@ private Long vcmd_saveStateLocally(Map r9,device,List prms,Boolean global=false)
 private Long vcmd_saveStateGlobally(Map r9,device,List prms){ return vcmd_saveStateLocally(r9,device,prms,true) }
 
 // attr -> (v -> cmdName) first-wins; attr -> cmdName (v==null) last-wins; v -> cmdName last-wins
-@Field static Map<String,Map<String,String>> physExactFLD=[:]
-@Field static Map<String,String> physFuzzyAttrFLD=[:]
-@Field static Map<String,String> physFuzzyValFLD=[:]
+// the three lookup tables, published together as one immutable-by-convention map so a reader can never
+// see one table built and another still empty: [e: attr->(v->cmd), a: attr->cmd, v: v->cmd]
+@Field static volatile Map<String,Map> physLookupsFLD=null
+
+private static Map<String,Map> gtPhysLookups(){
+	Map<String,Map> pl
+	pl=physLookupsFLD
+	if(pl==null){
+		buildPhysLookups() // racing builders produce identical tables; last publish wins
+		pl=physLookupsFLD
+	}
+	return pl
+}
 
 private static void buildPhysLookups(){
 	Map<String,Map<String,String>> byAttrVal=[:]
@@ -7190,9 +7196,7 @@ private static void buildPhysLookups(){
 			byVal[v]=k
 		}
 	}
-	physExactFLD=byAttrVal
-	physFuzzyAttrFLD=byAttr
-	physFuzzyValFLD=byVal
+	physLookupsFLD=[(sE):byAttrVal,(sA):byAttr,(sV):byVal] as Map<String,Map> // single volatile publish
 }
 
 private Long vcmd_loadStateLocally(Map r9,device,List prms,Boolean global=false){
@@ -7266,7 +7270,10 @@ private Long vcmd_loadStateLocally(Map r9,device,List prms,Boolean global=false)
 		del+=l100
 	}
 
-	if(physExactFLD.isEmpty()) buildPhysLookups()
+	Map<String,Map> pl=gtPhysLookups()
+	Map physExact=pl[sE]
+	Map physFuzzyAttr=pl[sA]
+	Map physFuzzyVal=pl[sV]
 	def value
 	Integer n; n=iZ
 	String exactCommand,fuzzyCommand,fuzzyCommand1,t0
@@ -7275,11 +7282,11 @@ private Long vcmd_loadStateLocally(Map r9,device,List prms,Boolean global=false)
 		n+=i1
 		exactCommand= fuzzyCommand= fuzzyCommand1=sNL
 		t0="Restoring ${gtLbl(device)} : '$attr' to value '$value'".toString()
-		Map attrExact=(Map)physExactFLD[attr]
+		Map attrExact=(Map)physExact[attr]
 		exactCommand=attrExact!=null ? (String)(attrExact[(String)value] ?: sNL) : sNL
 		if(exactCommand!=sNL) t0+=" using command".toString()
-		fuzzyCommand=(String)(physFuzzyAttrFLD[attr] ?: sNL)
-		fuzzyCommand1=(String)(physFuzzyValFLD[(String)value] ?: sNL)
+		fuzzyCommand=(String)(physFuzzyAttr[attr] ?: sNL)
+		fuzzyCommand1=(String)(physFuzzyVal[(String)value] ?: sNL)
 		if(exactCommand!=sNL){
 			if(lg)debug "${t0} $exactCommand()",r9
 			executePhysicalCommand(r9,device,exactCommand,null,del,scheduleDevice)
@@ -7373,7 +7380,6 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 			String sldt='c:fbt:'+myC.toString()
 			Long ladderUpdated
 			ladderUpdated=(Long)cast(r9,mMs(r9,sCACHE)[sldt],sDTIME) // gives back current dtime if null
-			//Boolean didC; didC=false
 			if(ladderIndex>=steps) value=false
 			else{
 				t=wnow()
@@ -7393,7 +7399,6 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 				}else{
 
 					value=evaluateCondition(r9,cndtn,sC,async)
-					//didC=true
 
 					if(wt==sN){
 						if(value) value=false
@@ -7405,7 +7410,6 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 				if(value){
 					//successful step, move on
 					ladderIndex+= i1
-					//didC=false
 					ladderUpdated=t
 					cancelStatementSchedules(r9,myC)
 					String ms; ms=sBLK
@@ -7424,7 +7428,6 @@ private Boolean evaluateConditions(Map r9,Map cndtns,String collection,Boolean a
 
 			switch(value){
 				case null:
-					//Integer st=ladderIndex +(didC?i1:iZ)
 					//we need to exit time events set to work out the timeouts
 					if(currun(r9)==myC)r9[sTERM]=true
 					break
@@ -7523,10 +7526,10 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 	operand=oper
 	if(!operand)operand=[(sT):sC] //older pistons don't have the to: operand (time offset), simulating an empty one
 	String ovt=sMvt(operand)
-	movt=(ovt ? [(sVT):ovt] : [:]) as LinkedHashMap
-	String nD="${node?.$}:".toString()
-	nodeI=nD+"$index:0".toString()
-	Long t=wnow()
+	movt= ovt ? [(sVT):ovt] as LinkedHashMap : mEMPTY // '+' always returns a new map, so mEMPTY is never modified
+	Boolean wantI= node!=null
+	String nD= wantI ? "${node.$}:".toString() : sBLK
+	nodeI= wantI ? nD+"$index:0".toString() : sBLK
 	String LID=sMs(r9,sLOCID)
 	mv=null
 	switch(sMt(operand)){
@@ -7558,25 +7561,25 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 			for(String d in expandDeviceList(r9,liMd(operand))){
 				if(getDevice(r9,d)) deviceIds.push(d)
 			}
-			nodeI=nD+sD
+			if(wantI)nodeI=nD+sD
 			mv=rtnMap(sDEV,deviceIds.unique())
 			break
 		case sV: //virtual devices
 			Map ce=mMs(r9,sCUREVT)
 			String rEN=sMs(ce,sNM)
 			String evntVal="${ce[sVAL]}".toString()
-			nodeI=nD+sV
+			if(wantI)nodeI=nD+sV
 			String oV; oV=fixAttr(sMv(operand))
 			switch(oV){
 				case sTIME:
 				case sDATE:
 				case sDTIME:
-					mv= rtnMap(oV,(Long)cast(r9,t,oV,sLONG))
+					mv= rtnMap(oV,(Long)cast(r9,wnow(),oV,sLONG))
 					break
 				case sMODE:
 				case sPWRSRC:
 				case sHSMSTS:
-					nodeI=LID+sCLN+oV
+					if(wantI)nodeI=LID+sCLN+oV
 					mv=getDeviceAttribute(r9,LID,oV,null,trigger)
 					break
 			// for the rest of these, add in the eXcluded, a: markers
@@ -7645,10 +7648,10 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 				mv=rtnMap(sDEV,asum)+movt
 			}else{
 				Boolean hasI=sMs(operand,sXI)!=sNL
-				if(hasI)movt=ovt ? [(sVT):ovt.replace(sLRB,sBLK)]:[:]
+				if(hasI)movt=ovt ? [(sVT):ovt.replace(sLRB,sBLK)] as LinkedHashMap : mEMPTY
 				String operX= sMs(operand,sX)
 				mv=getVariable(r9,operX+(hasI ? sLB+sMs(operand,sXI)+sRB:sBLK))+movt
-				if(operX && operX.startsWith(sAT)){
+				if(wantI && operX && operX.startsWith(sAT)){
 					if(operX.startsWith(sAT2)){
 						String vn=operX.substring(i2)
 						nodeI=sVARIABLE+sCLN+vn
@@ -7693,13 +7696,12 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 			mv=getArgument(r9,sMs(operand,sU))
 			break
 	}
-	if(mv)vals=[[(sI):nodeI,(sV):mv]] as List<LinkedHashMap>
-
-	if(node==null){ // return a Map instead of a List
-		Map ret= vals.size() ? mMv(vals[iZ]) :rtnMap(sDYN,null)
+	if(!wantI){ // return a Map instead of a List
+		Map ret= mv ?: (vals.size() ? mMv(vals[iZ]) :rtnMap(sDYN,null))
 		if(lge)myDetail r9,myS+"result:$ret"
 		return ret
 	}
+	if(mv)vals=[[(sI):nodeI,(sV):mv]] as List<LinkedHashMap>
 	if(lge)myDetail r9,myS+"result:$vals"
 	return vals
 }
@@ -7717,7 +7719,7 @@ private Map callFunc(Map r9,String func,List p){
 }
 
 
-@Field volatile static Map<String,Boolean> needUpdateFLD=[:]
+@Field volatile static ConcurrentHashMap<String,Boolean> needUpdateFLD=new ConcurrentHashMap<String,Boolean>()
 /** deal with cache for triggers refreshing */
 void stNeedUpdate(){
 	String myId=sAppId()
@@ -7970,7 +7972,7 @@ private Boolean evaluateComparison(Map r9,String comparison,Map lo,Map ro=null,M
 		String s1="lo: $lo ro: $ro ro2: $ro2 to: $to to2: $to2 options: $options"
 		myDetail r9,mySt+s1,i1
 	}
-	String fn="comp_"+comparison
+	String fn='comp_'+comparison
 	Map loOperMap=mMs(lo,sOPERAND)
 	String loG= sMs(loOperMap,sG) ?: sANY
 	Boolean result,res
@@ -8085,18 +8087,71 @@ private Boolean evaluateComparison(Map r9,String comparison,Map lo,Map ro=null,M
 	return result
 }
 
+@CompileStatic
 private Boolean callComp(Map r9,String fn,Map lv,Map rv,Map rv2,Map tv,Map tv2){
 	Boolean lge=isDbg(r9) && isEric(r9)
 	String s; s=sBLK
 	if(lge){
-		s= "callComp $fn $lv $rv $rv2 $tv $tv2"
+		s= "callComp $fn $lv $rv $rv2 $tv $tv2".toString()
 		myDetail r9,s,i1
 	}
 
-	Boolean a=(Boolean)"$fn"(r9,lv,rv,rv2,tv,tv2)
+	Boolean a
+	String f; f=fn
+	Boolean neg; neg=false
+	if(f.startsWith('comp_was')){ // comp_was / comp_was_xxx -> valueWas with 'is' / 'is_xxx' (no comp_was_* methods)
+		a=valueWas(r9,lv,rv,rv2,tv,'is'+f.substring(8))
+	}else{
+		if(f.startsWith('comp_stays_')){ // comp_stays_xxx -> comp_is_xxx (no comp_stays_* methods); comp_stays itself is below
+			switch(f){
+				case 'comp_stays_unchanged': f='comp_changes'; neg=true; break
+				case 'comp_stays_away_from': f='comp_is_not_equal_to'; break
+				case 'comp_stays_away_from_any_of': f='comp_is_not_any_of'; break
+				default: f='comp_is_'+f.substring(11)
+			}
+		}
+		// direct calls for the common comparisons (avoids GString + dynamic method lookup); others by name
+		switch(f){
+			case 'comp_is': a=comp_is(r9,lv,rv,rv2,tv,tv2); break
 
-	if(lge)myDetail r9,s+ " RESULT: $a ${myObj(lv?.v?.v)} ${myObj(rv?.v?.v)}"
+			case 'comp_changes': a=comp_changes(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_changes_to': a=comp_changes_to(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_happens_daily_at': a=comp_happens_daily_at(r9,lv,rv,rv2,tv,tv2); break
+
+			case 'comp_is_not': a=comp_is_not(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_equal_to': a=comp_is_equal_to(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_not_equal_to': a=comp_is_not_equal_to(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_different_than': a=comp_is_different_than(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_less_than': a=comp_is_less_than(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_less_than_or_equal_to': a=comp_is_less_than_or_equal_to(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_greater_than': a=comp_is_greater_than(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_greater_than_or_equal_to': a=comp_is_greater_than_or_equal_to(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_true': a=comp_is_true(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_false': a=comp_is_false(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_any_of': a=comp_is_any_of(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_inside_of_range': a=comp_is_inside_of_range(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_before': a=comp_is_before(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_after': a=comp_is_after(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_is_between': a=comp_is_between(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_changes_away_from': a=comp_changes_away_from(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_receives': a=comp_receives(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_gets': a=comp_gets(r9,lv,rv,rv2,tv,tv2); break
+			case 'comp_stays': a=comp_stays(r9,lv,rv,rv2,tv,tv2); break
+			default: a=callCompD(f,r9,lv,rv,rv2,tv,tv2)
+		}
+		if(neg)a=!a
+	}
+
+	if(lge){
+		Map lm= lv ? mMv(lv):null; Map rm= rv ? mMv(rv):null
+		myDetail r9,s+ " RESULT: $a ${myObj(lm ? oMv(lm):null)} ${myObj(rm ? oMv(rm):null)}"
+	}
 	return a
+}
+
+/** by-name call for comparisons not in callComp's switch (dynamic dispatch, so not @CompileStatic) */
+private Boolean callCompD(String f,Map r9,Map lv,Map rv,Map rv2,Map tv,Map tv2){
+	return (Boolean)"$f"(r9,lv,rv,rv2,tv,tv2)
 }
 
 @CompileStatic
@@ -8159,13 +8214,6 @@ private void cancelConditionSchedules(Map r9,Integer cndtnId){
 	if(!(cndtnId in (List<Integer>)mMs(r9,sCNCLATNS)[sCONDITIONS]))
 		((List<Integer>)mMs(r9,sCNCLATNS)[sCONDITIONS]).push(cndtnId)
 }
-/*
-private static Boolean matchDeviceSubIndex(list,deviceSubIndex){
-	if(!list || !(list instanceof List) || list.size()==iZ)return true
-	return list.collect{ "$it".toString() }.indexOf("$deviceSubIndex".toString())>=iZ
-	return true
-} */
-
 /**
  * physical support
  */
@@ -8229,13 +8277,15 @@ private static Boolean isEntryInCache(Map r9,Map value){
 private static void updateCache(Map r9,Map value,Long t){
 	String n=sMs(value,sI)
 	Map oldValue=mMs(mMs(r9,sCACHE),n)
-	Map valueV=[:]+mMv(value)
-	if(oldValue==null || sMt(oldValue)!=sMt(valueV) || "${oldValue[sV]}"!="${valueV[sV]}"){
-		if(valueV[sD]!=null && valueV[sD] instanceof Long) valueV.remove(sD)
-		if(valueV[sVT]!=null) valueV.remove(sVT)
-		if(valueV[sX]!=null) valueV.remove(sX)
-		if(valueV[sP]!=null) valueV.remove(sP)
-		msMs(r9,sNWCACHE)[n]=valueV+( [(sS):t] as Map)
+	Map nv=mMv(value)
+	if(oldValue==null || sMt(oldValue)!=sMt(nv) || "${oldValue[sV]}"!="${nv[sV]}"){
+		Map valueV=[:]+nv // copy only when it changed
+		if(valueV[sD] instanceof Long) valueV.remove(sD)
+		valueV.remove(sVT)
+		valueV.remove(sX)
+		valueV.remove(sP)
+		valueV[sS]=t
+		msMs(r9,sNWCACHE)[n]=valueV
 	}
 }
 
@@ -8284,7 +8334,7 @@ private Boolean valueWas(Map r9,Map comparisonValue,Map rightValue,Map rightValu
 			for(Map stte in states){
 				v= stte[sVAL]
 				if(needFix) v= gtThreeAxisVal(v,attr)
-				if(!callComp(r9,"comp_$func", [(sI):sMs(comparisonValue,sI),(sV):rtnMap(comp_t,cast(r9,v,comp_t))],
+				if(!callComp(r9,'comp_'+func, [(sI):sMs(comparisonValue,sI),(sV):rtnMap(comp_t,cast(r9,v,comp_t))],
 						rightValue,rightValue2,timeValue,null))break
 				duration+= lMs(stte,sDURATION)
 			}
@@ -8340,22 +8390,33 @@ private Boolean valueChanged(Map r9,Map comparisonValue,Map timeValue){
 	return res
 }
 
+@Field static final ConcurrentHashMap<String,Pattern> matchPatFLD=new ConcurrentHashMap<String,Pattern>()
+
+@CompileStatic
 private static Boolean match(String str,String pattern){
 	Integer sz=pattern.size()
 	if(sz>i2 && pattern.startsWith(sDIV) && pattern.endsWith(sDIV)){
-		def ppattern= ~pattern.substring(i1,sz-i1)
-		return !!(str =~ ppattern)
+		Pattern pp; pp=matchPatFLD[pattern]
+		if(pp==null){
+			pp=Pattern.compile(pattern.substring(i1,sz-i1))
+			if(matchPatFLD.size()>100) matchPatFLD.clear()
+			matchPatFLD[pattern]=pp
+		}
+		return pp.matcher(str).find()
 	}
 	return str.contains(pattern)
 }
 
 //comparison low level functions
+@CompileStatic
 private Boolean comp_is					(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){
 	Map l= mMv(lv) ?: [:]
 	Map r= mMv(rv) ?: [:]
 	return strEvalExpr(r9,l)==strEvalExpr(r9,r) || (l[sN] && scast(r9,l[sN])==scast(r9,oMv(r)))
 }
+@CompileStatic
 private Boolean comp_is_not				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_is_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){
 	Map l= mMv(lv) ?: [:]
 	Map r= mMv(rv) ?: [:]
@@ -8363,54 +8424,64 @@ private Boolean comp_is_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv
 	String dt= lt==sDEC || rt==sDEC ? sDEC:(lt==sINT || rt==sINT ? sINT:sDYN)
 	return oMv(evaluateExpression(r9,l,dt))==oMv(evaluateExpression(r9,r,dt))
 }
+@CompileStatic
 private Boolean comp_is_not_equal_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is_equal_to(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_is_different_than	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_not_equal_to(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_is_less_than		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return dblEvalExpr(r9,mMv(lv))<dblEvalExpr(r9,mMv(rv)) }
+@CompileStatic
 private Boolean comp_is_greater_than_or_equal_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is_less_than(r9,lv,rv) }
+@CompileStatic
 private Boolean comp_is_greater_than	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return dblEvalExpr(r9,mMv(lv))>dblEvalExpr(r9,mMv(rv)) }
+@CompileStatic
 private Boolean comp_is_less_than_or_equal_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is_greater_than(r9,lv,rv) }
+@CompileStatic
 private Boolean comp_is_even			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return intEvalExpr(r9,mMv(lv)) % i2==iZ }
+@CompileStatic
 private Boolean comp_is_odd				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return intEvalExpr(r9,mMv(lv)) % i2!=iZ }
+@CompileStatic
 private Boolean comp_is_true			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return boolEvalExpr(r9,mMv(lv)) }
+@CompileStatic
 private Boolean comp_is_false			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !boolEvalExpr(r9,mMv(lv)) }
+@CompileStatic
 private Boolean comp_is_inside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Double v=dblEvalExpr(r9,mMv(lv)); Double v1=dblEvalExpr(r9,mMv(rv)); Double v2=dblEvalExpr(r9,mMv(rv2)); return (v1<v2) ? (v>=v1 && v<=v2):(v>=v2 && v<=v1)}
+@CompileStatic
 private Boolean comp_is_outside_of_range	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is_inside_of_range(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_is_any_of			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){
 	String v=strEvalExpr(r9,mMv(lv))
-	Map r=[:]+mMv(rv)
-	String s=sMv(r)
+	Map rv1=mMv(rv)
+	String s=sMv(rv1)
 	List<String> parts=anyOfCacheFLD[s]
-	if(parts==null){ parts=s.tokenize(sCOMMA).collect{ ((String)it).trim() }; if(anyOfCacheFLD.size()>500) anyOfCacheFLD=[:]; anyOfCacheFLD[s]=parts; anyOfCacheFLD=anyOfCacheFLD }
+	if(parts==null){
+		parts=[]
+		for(String it in s.tokenize(sCOMMA)) parts.push(it.trim())
+		if(anyOfCacheFLD.size()>500) anyOfCacheFLD.clear()
+		anyOfCacheFLD[s]=parts
+	}
+	// string types evaluate to the entry itself; others (numbers, times...) need the cast so "5" matches "5.0"
+	if(sMt(rv1) in lANYSTR) return v in parts
+	Map r=[:]+rv1
 	for(String vi in parts){
 		r[sV]=vi
 		if(v==strEvalExpr(r9,r))return true
 	}
 	return false
 }
+@Field static final List<String> lANYSTR=['string','enum','error','phone','uri','text','dynamic'] // sSTR,sENUM,sERROR,sPHONE,sURI,sTEXT,sDYN (literals: @Field init order is not guaranteed)
+@CompileStatic
 private Boolean comp_is_not_any_of		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is_any_of(r9,lv,rv,rv2,tv,tv2)}
 
-private Boolean comp_was				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,sIS)}
-private Boolean comp_was_not			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_not')}
-private Boolean comp_was_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_equal_to')}
-private Boolean comp_was_not_equal_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_not_equal_to')}
-private Boolean comp_was_different_than		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_different_than')}
-private Boolean comp_was_less_than		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_less_than')}
-private Boolean comp_was_less_than_or_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_less_than_or_equal_to')}
-private Boolean comp_was_greater_than	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_greater_than')}
-private Boolean comp_was_greater_than_or_equal_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_greater_than_or_equal_to')}
-private Boolean comp_was_even			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_even')}
-private Boolean comp_was_odd			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_odd')}
-private Boolean comp_was_true			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_true')}
-private Boolean comp_was_false			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_false')}
-private Boolean comp_was_inside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,sISINS)}
-private Boolean comp_was_outside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_outside_of_range')}
-private Boolean comp_was_any_of			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_any_of')}
-private Boolean comp_was_not_any_of		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueWas(r9,lv,rv,rv2,tv,'is_not_any_of')}
 
+@CompileStatic
 private Boolean comp_changed			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,tv2=null){ return valueChanged(r9,lv,tv)}
+@CompileStatic
 private Boolean comp_did_not_change		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !valueChanged(r9,lv,tv)}
 
+@CompileStatic
 private static Boolean comp_is_any		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return true }
+@CompileStatic
 private Boolean comp_is_before			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){
 	Map l=mMv(lv)
 	String lvt= sMt(l) in LT1 ? sMt(l) : sNL
@@ -8424,7 +8495,9 @@ private Boolean comp_is_before			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=
 
 	return v<v1
 }
+@CompileStatic
 private Boolean comp_is_after			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is_before(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_is_between			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){
 	Map l=mMv(lv)
 	String lvt= sMt(l) in LT1 ? sMt(l) : sNL
@@ -8442,62 +8515,84 @@ private Boolean comp_is_between			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv
 
 	return v1<v2 ? v>=v1 && v<v2 : v<v2 || v>=v1
 }
+@CompileStatic
 private Boolean comp_is_not_between		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_is_between(r9,lv,rv,rv2,tv,tv2)}
 
 /*triggers*/
+@CompileStatic
 private Boolean comp_gets				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return scast(r9,oMvv(lv))==scast(r9,oMvv(rv)) /* && matchDeviceSubIndex(mMv(lv).i,iMs(r9[sCUREVT],sINDX))*/ }
-private static Boolean comp_receives	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return "${oMvv(lv)}"=="${oMvv(rv)}" && matchDeviceInteraction(lv,r9)}
+@CompileStatic
+private static Boolean comp_receives	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return String.valueOf(oMvv(lv))==String.valueOf(oMvv(rv)) && matchDeviceInteraction(lv,r9)}
+@CompileStatic
 private static Boolean comp_gets_any	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return false }
+@CompileStatic
 private static Boolean comp_event_occurs		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return false }
+@CompileStatic
 private Boolean comp_executes			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_arrives			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return (String)r9[sEVENT][sNM]=='email' && match(r9[sEVENT]?.jsonData?.from ?: sBLK,strEvalExpr(r9,mMv(rv))) && match(r9[sEVENT]?.jsonData?.message ?: sBLK,strEvalExpr(r9,mMv(rv2)))}
+@CompileStatic
+private Boolean comp_arrives			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){
+	Map ev=mMs(r9,sEVENT)
+	if(ev==null || sMs(ev,sNM)!='email')return false
+	Map jd=mMs(ev,'jsonData')
+	return match((jd!=null ? sMs(jd,'from'):sNL) ?: sBLK,strEvalExpr(r9,mMv(rv))) && match((jd!=null ? sMs(jd,'message'):sNL) ?: sBLK,strEvalExpr(r9,mMv(rv2)))
+}
+@CompileStatic
 private static Boolean comp_happens_daily_at		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ bIs(r9,sWUP) }
+@CompileStatic
 private Boolean comp_changes		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && matchDeviceInteraction(lv,r9)}
+@CompileStatic
 private Boolean comp_changes_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && comp_receives(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_changes_away_from		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && String.valueOf(oMvv(oldValue))==String.valueOf(oMvv(rv)) && matchDeviceInteraction(lv,r9)}
+@CompileStatic
 private Boolean comp_drops				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && dcast(r9,oMvv(oldValue))>dcast(r9,oMvv(lv))}
+@CompileStatic
 private Boolean comp_does_not_drop		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_drops(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_drops_below		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>=v1 && dcast(r9,oMvv(lv))<v1}
+@CompileStatic
 private Boolean comp_drops_to_or_below	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>v1 && dcast(r9,oMvv(lv))<=v1}
+@CompileStatic
 private Boolean comp_rises				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && dcast(r9,oMvv(oldValue))<dcast(r9,oMvv(lv))}
+@CompileStatic
 private Boolean comp_does_not_rise		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_rises(r9,lv,rv,rv2,tv,tv2)}
+@CompileStatic
 private Boolean comp_rises_above		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<=v1 && dcast(r9,oMvv(lv))>v1}
+@CompileStatic
 private Boolean comp_rises_to_or_above	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<v1 && dcast(r9,oMvv(lv))>=v1}
+@CompileStatic
 private Boolean comp_remains_below		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<v1 && dcast(r9,oMvv(lv))<v1}
+@CompileStatic
 private Boolean comp_remains_below_or_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))<=v1 && dcast(r9,oMvv(lv))<=v1}
+@CompileStatic
 private Boolean comp_remains_above		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>v1 && dcast(r9,oMvv(lv))>v1}
+@CompileStatic
 private Boolean comp_remains_above_or_equal_to		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); Double v1=dcast(r9,oMvv(rv)); return oldValue!=null && dcast(r9,oMvv(oldValue))>=v1 && dcast(r9,oMvv(lv))>=v1}
+@CompileStatic
 private Boolean comp_enters_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return (ov<v1 || ov>v2) && v>=v1 && v<=v2}
+@CompileStatic
 private Boolean comp_exits_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return ov>=v1 && ov<=v2 && (v<v1 || v>v2)}
+@CompileStatic
 private Boolean comp_remains_inside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return ov>=v1 && ov<=v2 && v>=v1 && v<=v2}
+@CompileStatic
 private Boolean comp_remains_outside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); if(oldValue==null)return false; Double ov=dcast(r9,oMvv(oldValue)); Double v=dcast(r9,oMvv(lv)); Double v1; v1=dcast(r9,oMvv(rv)); Double v2; v2=dcast(r9,oMvv(rv2)); if(v1>v2){ Double vv=v1; v1=v2; v2=vv }; return (ov<v1 || ov>v2) && (v<v1 || v>v2)}
+@CompileStatic
 private Boolean comp_becomes_even		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2!=iZ && icast(r9,oMvv(lv))%i2==iZ}
+@CompileStatic
 private Boolean comp_becomes_odd		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2==iZ && icast(r9,oMvv(lv))%i2!=iZ}
+@CompileStatic
 private Boolean comp_remains_even		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2==iZ && icast(r9,oMvv(lv))%i2==iZ}
+@CompileStatic
 private Boolean comp_remains_odd		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv);return oldValue!=null && icast(r9,oMvv(oldValue))%i2!=iZ && icast(r9,oMvv(lv))%i2!=iZ}
 
+@CompileStatic
 private Boolean comp_changes_to_any_of			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return valueCacheChanged(r9,lv)!=null && comp_is_any_of(r9,lv,rv,rv2,tv,tv2) && matchDeviceInteraction(lv,r9)}
+@CompileStatic
 private Boolean comp_changes_away_from_any_of		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ Map oldValue=valueCacheChanged(r9,lv); return oldValue!=null && comp_is_any_of(r9,oldValue,rv,rv2) && matchDeviceInteraction(lv,r9)}
 
+@CompileStatic
 private Boolean comp_stays				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is(r9,lv,rv,rv2,tv,tv2)}
 //private Boolean comp_stays_unchanged			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return true }
-private Boolean comp_stays_unchanged			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return !comp_changes(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_not				(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_not(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_equal_to			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_equal_to(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_different_than		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_different_than(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_less_than			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_less_than(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_less_than_or_equal_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_less_than_or_equal_to(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_greater_than			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_greater_than(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_greater_than_or_equal_to	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_greater_than_or_equal_to(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_even			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_even(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_odd			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_odd(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_true			(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_true(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_false		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_false(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_inside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_inside_of_range(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_outside_of_range		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_outside_of_range(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_any_of		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_any_of(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_away_from	(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_not_equal_to(r9,lv,rv,rv2,tv,tv2)}
-private Boolean comp_stays_away_from_any_of		(Map r9,Map lv,Map rv=null,Map rv2=null,Map tv=null,Map tv2=null){ return comp_is_not_any_of(r9,lv,rv,rv2,tv,tv2)}
 
 private void traverseStatements(node,Closure closure,parentNode=null,Map<String,Boolean> data=null,Map<String,Integer> lvl=null){
 	if(!node)return
@@ -8638,19 +8733,31 @@ private void updateDeviceList(Map r9){
 
 @CompileStatic
 private void updateCacheFld(Map r9,String nm,Object v,String s,Boolean gm){
-	if(!gm || getCachedMaps(s)!=null){
-		String id=sMs(r9,snId)
+	String id=sMs(r9,snId)
+	Boolean done; done=false
+	getTheLock(id,s)
+	Map nc=theCacheVFLD[id]
+	// gm: write only into a valid cache entry (same test as getCachedFields); common case needs just this one lock
+	if(nc && (!gm || (nc[sCACHE] instanceof Map && nc[sBLD] instanceof Integer))){
+		nc[nm]=v
+		theCacheVFLD[id]=nc
+		done=true
+	}
+	releaseTheLock(id)
+	if(!done && gm && getCachedFields(s,lEMPTYS)!=null){ // cache missing or invalid: rebuild it, then write
 		getTheLock(id,s)
-		Map nc=theCacheVFLD[id]
+		nc=theCacheVFLD[id]
 		if(nc){
 			nc[nm]=v
 			theCacheVFLD[id]=nc
-			theCacheVFLD=theCacheVFLD
-			mb()
 		}
 		releaseTheLock(id)
 	}
 }
+
+/** shared empty key list for getCachedFields validity checks; never modified */
+@Field static final List<String> lEMPTYS=[]
+@Field static final Map mEMPTY=[:]
 
 @CompileStatic
 private static addWarning(Map node,String msg){
@@ -8659,7 +8766,7 @@ private static addWarning(Map node,String msg){
 	((List)node[sW]).push(msg) // modifies the code
 }
 
-@Field volatile static Map<String,List<String>> TRKINGFLD=[:]
+@Field volatile static ConcurrentHashMap<String,List<String>> TRKINGFLD=new ConcurrentHashMap<String,List<String>>()
 
 @CompileStatic
 /**
@@ -8717,23 +8824,6 @@ void updTrkVal(Map r9,String dev, String attr,Long t){
 			myDetail r9,"found ${isVar ? sVARIABLE:sDEV} ${tdev}${attr}, updating cache with value $val  ${t}",iN2
 	}
 }
-
-/**
- * update all trackers
-@CompileStatic
-void updTrkrs(Map r9){
-	String dev,attr
-	String appStr= sAppId()
-	List<String> trk= TRKINGFLD[appStr] ?: []
-	for(String tmp in trk){
-		Boolean isVar= attr.contains(sVARIABLE+sCLN) || attr.contains(sAT)
-		String[] a= tmp.split(sCLN)
-		dev= !isVar ? sCLN+a[1]+sCLN : sMs(r9,sLOCID)
-		attr= !isVar ? a[2] : tmp
-		updTrkVal(r9,dev,attr,wnow())
-	}
-}
- */
 
 @Field static final String sALLOWA = 'allowA'
 @Field static final String sAVALS = 'avals'
@@ -8855,7 +8945,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 			switch(sMt(operand)){
 				case sP: //physical device
 					String deviceId
-					for(String mdeviceId in expandDeviceList(r9,liMd(operand),true)){
+					for(String mdeviceId in expandDeviceList(r9,liMd(operand))){
 						deviceId=mdeviceId
 						if(deviceId in oLIDS) deviceId=LID
 						String attr=sMa(operand)
@@ -9048,10 +9138,6 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 							else{
 								Boolean isbadVar
 								isbadVar= isTracking && lo && sMt(lo)==sX && !(sMs(lo,sX).startsWith(sAT))
-								/*if(isbadVar){
-									Map a=getVariable(r9,sMs(lo,sX))
-									if(!isErr(a)) isbadVar=sMt(a)!=sDEV
-								}*/
 								Boolean localTracking; localTracking=isTracking
 								if(isbadVar) tm += " using a non global or non device variable,"
 								if(isAll){
@@ -9142,7 +9228,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 			}
 			switch(t){
 				case sACTION:
-					for(String mdeviceId in expandDeviceList(r9,liMd(node),true)){
+					for(String mdeviceId in expandDeviceList(r9,liMd(node))){
 						String deviceId; deviceId=mdeviceId
 						if(deviceId in oLIDS)deviceId=LID
 						incrementDevices(deviceId,sNL,sNL)
@@ -9391,7 +9477,7 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 			rawDevices=null
 
 			assignSt(sSUBS,ss)
-			if(lg>i1)trace msg,r9
+			//if(lg>i1)trace msg,r9
 
 			//subscribe(app,appHandler)
 			String t,t0,e
@@ -9432,41 +9518,24 @@ private void subscribeAll(Map r9,Boolean doit,Boolean inMem){
 }
 
 @CompileStatic
-private List<String> expandDeviceList(Map r9,List<String> devs,Boolean localVarsOnly=false){
-	Boolean mlocalVars=false	//allowing global vars
-	List<String>devices=devs
+private List<String> expandDeviceList(Map r9,List<String> devs){
 	List<String> res; res=[]
-	if(devices){
-		for(String deviceId in devices){
-			if(deviceId){
-				if(isWcDev(deviceId)) res.push(deviceId)
-				else{
-					if(mlocalVars){
-						//during subscriptions we can use local vars only to make sure we don't subscribe to "variable" lists of devices
-						Map var=mMs(mMs(r9,sLOCALV),deviceId)
-						if(var && sMt(var)==sDEV && oMv(var) instanceof Map){
-							Map m=mMv(var)
-							if(sMt(m)==sD && m[sD] instanceof List)res+=liMd(m)
-						}
-					}else{
-						Map var=getVariable(r9,deviceId)
-						if(sMt(var)==sDEV)
-							res+=(oMv(var) instanceof List) ? liMv(var):[]
-						else{
-							//if(oMv(var) && eric())doLog(sDBG,"expandDeviceList: checking variable sMv(var): ${sMv(var)}")
-							def device=oMv(var) ? getDevice(r9,scast(r9,sMv(var))):null
-							if(device!=null)res+= [hashD(r9,device)]
-						}
-					}
-				}
+	for(String deviceId in (devs ?: [] as List<String>) ){
+		if(!deviceId)continue
+		if(isWcDev(deviceId)) res.push(deviceId)
+		else{
+			// variable (local or global) holding a device list or a device id/name
+			Map var=getVariable(r9,deviceId)
+			if(sMt(var)==sDEV)
+				res+=(oMv(var) instanceof List) ? liMv(var):[]
+			else{
+				def device=oMv(var) ? getDevice(r9,scast(r9,sMv(var))):null
+				if(device!=null)res+= [hashD(r9,device)]
 			}
 		}
 	}
 	return res.unique()
 }
-
-//def appHandler(evt){
-//}
 
 /** return a device or location object for idOrName */
 @CompileStatic
@@ -9658,7 +9727,20 @@ private getDeviceAttributeValue(Map r9,device,String attr,Boolean skipCurEvt=fal
 						break
 				}
 			}else{
-				res=device.currentValue(attr,true)
+				// per-run memo: currentValue(attr,true) is a database read. Cleared for a device when this
+				// piston commands it (recordCmd) and for all devices on a pause (doPause)
+				Map<String,Map> memo; memo=(Map<String,Map>)r9[sATTRMEMO]
+				if(memo==null){ memo=[:] as Map<String,Map>; r9[sATTRMEMO]=memo }
+				String dId=(device instanceof DeviceWrapper ? sD:sL)+ldgDevId(device) // location ids can equal device ids
+				Map dm; dm=memo[dId]
+				if(dm!=null && dm.containsKey(attr)){
+					res=dm[attr]
+					if(lge)myDetail r9,s+" memo $res",iN2
+				}else{
+					res=device.currentValue(attr,true)
+					if(dm==null){ dm=[:]; memo[dId]=dm }
+					dm[attr]=res
+				}
 			}
 		}catch(all){
 			error gtAttrErr(device)+attr+sCLN,r9,iN2,all
@@ -9674,6 +9756,8 @@ static String gtAttrErr(device){
 }
 
 @Field static final String sCNUMBER='NUMBER'
+@Field static final ConcurrentHashMap<String,Map> devAttrTypeFLD=new ConcurrentHashMap<String,Map>()
+
 /**
  * Return a Map of the attribute details, will return map with type String if no attribute is found
  */
@@ -9682,10 +9766,15 @@ private static Map devAttrT(String attr,device){
 	if(attr){
 		a1=Attributes()[attr] // check db first
 		if(a1==null && device){
-			// ask the device what is the type
-			def at=device.getSupportedAttributes().find{ (String)it.getName()==attr }
-			// enum,string,json_object -> string; number, date?, vector3?
-			if(at && at.getDataType()==sCNUMBER) attribute=[(sT):sDEC]
+			// ask the device what is the type (memoized: scanning supported attributes is slow); cleared by clearParentCache
+			String k=String.valueOf(device.getId())+sCLN+attr
+			a1=devAttrTypeFLD[k]
+			if(a1==null){
+				def at=device.getSupportedAttributes().find{ (String)it.getName()==attr }
+				// enum,string,json_object -> string; number, date?, vector3?
+				if(at && at.getDataType()==sCNUMBER) attribute=[(sT):sDEC]
+				devAttrTypeFLD[k]=attribute
+			}
 		}
 	}
 	Map res= a1 ?: attribute
@@ -9708,8 +9797,10 @@ private Map getDeviceAttribute(Map r9,String ideviceId,String attr,subDeviceInde
 	Map mv; mv=[:]
 	Map attribute; attribute=[:]
 	def device
+	Boolean isLoc // getDevice returns the location only for sALLLOC ids, which is this first branch
 
 	if(deviceId in (List<String>)r9[sALLLOC]){ //backward compatibility; we have the location device
+		isLoc=true
 		device=gtLocation()
 		deviceId=sMs(r9,sLOCID)
 		Boolean useEvt; useEvt=false
@@ -9717,8 +9808,8 @@ private Map getDeviceAttribute(Map r9,String ideviceId,String attr,subDeviceInde
 		if(cdev==sMs(r9,sLOCID)){
 			String r9EvN=sMs(ce,sNM)
 			v=sMs(ce,sVAL)
-			List<String> l=[sHSMSTS,sALRMSSTATUS]
-			useEvt= attr && v!=sNL && (r9EvN==attr || (r9EvN in l && attr in l))
+			useEvt= attr && v!=sNL && (r9EvN==attr ||
+				((r9EvN==sHSMSTS || r9EvN==sALRMSSTATUS) && (attr==sHSMSTS || attr==sALRMSSTATUS)))
 		}
 		switch(attr){
 			case sMODE:
@@ -9740,12 +9831,14 @@ private Map getDeviceAttribute(Map r9,String ideviceId,String attr,subDeviceInde
 
 	}else{
 
+		isLoc=false
 		device=getDevice(r9,deviceId)
 		if(device!=null){
-			def value; value=gtLbl(device)
+			def value
 			attribute=devAttrT(attr,device)
 			String atT=sMt(attribute)
-			if(attr!=sNL){
+			if(attr==sNL) value=gtLbl(device) // no attribute: device name
+			else{
 				def t0
 				t0=getDeviceAttributeValue(r9,device,attr)//,!trigger)
 				if(attr==sHUE && t0!=null && t0!=sBLK) t0=devHue2WcHue(t0 as Integer)
@@ -9766,21 +9859,22 @@ private Map getDeviceAttribute(Map r9,String ideviceId,String attr,subDeviceInde
 	Boolean eXclude; eXclude=false
 	if( attr!=sNL && (trigger || (attribute[sM]!=null && bIs(attribute,sM)) ) ){
 		//have to compare ids and type for hubitat since the locationid can be the same as the deviceid
-		Boolean isLoc= isDeviceLocation(device)
 		cdev=cdev ?: sMs(r9,sLOCID)
 		Boolean deviceMatch= (!isLoc && hashD(r9,device)==cdev) || (isLoc && cdev in (List<String>)r9[sALLLOC])
 		eXclude=  (!deviceMatch || (ce && fixAttr(attr)!=sMs(ce,sNM)))
 	}
-	return mv + ([
-		(sD):deviceId,
-		(sA):attr,
-//		(sI):subDeviceIndex,
-		(sX):eXclude
-	] as Map<String,Object>)
+	// mv is always a fresh map here: add the fields in place instead of copying
+	mv[sD]=deviceId
+	mv[sA]=attr
+	mv[sX]=eXclude
+	return mv
 }
 
+@Field static final List<String> lJORDS=['first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth']
+@Field static final List<String> lJLKEYS=['first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth','length','last']
+
 @CompileStatic
-private Map<String,Object> getJsonData(Map r9,data,String name,String feature=sNL){
+private Map<String,Object> getJsonData(Map r9,data,String name){
 	if(data){
 		String mpart; mpart=sNL
 		try{
@@ -9805,55 +9899,20 @@ private Map<String,Object> getJsonData(Map r9,data,String name,String feature=sN
 				if(args instanceof List){
 					List largs=(List)args
 					Integer sz=largs.size()
-					switch(part){
-						case 'length':
-							return rtnMapI(sz)
-						case 'first':
-							args=sz>iZ ? largs[iZ]:sBLK
-							continue
-						case 'second':
-							args=sz>i1 ? largs[i1]:sBLK
-							continue
-						case 'third':
-							args=sz>i2 ? largs[i2]:sBLK
-							continue
-						case 'fourth':
-							args=sz>i3 ? largs[i3]:sBLK
-							continue
-						case 'fifth':
-							args=sz>i4 ? largs[i4]:sBLK
-							continue
-						case 'sixth':
-							args=sz>i5 ? largs[i5]:sBLK
-							continue
-						case 'seventh':
-							args=sz>i6 ? largs[i6]:sBLK
-							continue
-						case 'eighth':
-							args=sz>i7 ? largs[i7]:sBLK
-							continue
-						case 'ninth':
-							args=sz>i8 ? largs[i8]:sBLK
-							continue
-						case 'tenth':
-							args=sz>i9 ? largs[i9]:sBLK
-							continue
-						case 'last':
-							args=sz>iZ ? largs[sz-i1]:sBLK
-							continue
+					if(part=='length')return rtnMapI(sz)
+					if(part=='last' || part in lJORDS){
+						Integer oi= part=='last' ? sz-i1 : lJORDS.indexOf(part)
+						args= oi>=iZ && oi<sz ? largs[oi]:sBLK
+						continue
 					}
 				}
 				if(!(args instanceof Map) && !(args instanceof List))return rtnMap(sDYN,sBLK)
-				Boolean overrideArgs=false
 
 				def idx; idx=iZ
 				String newPart; newPart=part
 				Boolean ins= (partIndex<parts.size()-i1)
 				if(ins && !part.endsWith(sRB) && args[newPart] instanceof List){
-					if( !(
-						(parts[partIndex+i1] in ['length','first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth','last'])
-						)
-					){
+					if(!(parts[partIndex+i1] in lJLKEYS)){
 						part+='[0]'
 						if(lge)myDetail r9,"getJsonData adjusted for list part: ${part}",iN2
 					}
@@ -9870,7 +9929,7 @@ private Map<String,Object> getJsonData(Map r9,data,String name,String feature=sN
 							idx=!isErr(var) ? oMv(var):idx
 						}
 					}
-					if(!overrideArgs && !!newPart)args=args ? args[newPart] :args
+					if(newPart)args=args ? args[newPart] :args
 					if(args){
 						if(args instanceof List){
 							Integer i= idx instanceof Integer ? idx:icast(r9,idx)
@@ -9880,7 +9939,7 @@ private Map<String,Object> getJsonData(Map r9,data,String name,String feature=sN
 					}
 					continue
 				}
-				if(!overrideArgs)args=args ? args[newPart] : args
+				args=args ? args[newPart] : args
 			}
 			if(lge)myDetail r9,"getJsonData return args: (${myObj(args)})",iN2
 			return rtnMap(sDYN,"$args".toString())
@@ -9940,24 +9999,23 @@ private Map getNFL(Map r9,String name){
 			r9[s][dataFeature]=getNFLDataFeature(dataFeature)
 		}
 	}
-	return getJsonData(r9,r9[s],name,'NFL')
+	return getJsonData(r9,r9[s],name)
 }
 
 private Map<String,Object> getIncidents(Map r9,String name){
 	return getJsonData(r9,r9[sINCIDENTS],name)
 }
 
-@Field volatile static Map<String,Boolean> initGlobalVFLD=[:]
-@Field volatile static Map<String,Map<String,Map>> globalVarsVFLD=[:]
+@Field static final ConcurrentHashMap<String,Boolean> initGlobalVFLD=new ConcurrentHashMap<String,Boolean>()
+@Field volatile static ConcurrentHashMap<String,Map<String,Map>> globalVarsVFLD=new ConcurrentHashMap<String,Map<String,Map>>() // volatile: setGlobal mutates inner maps in place; its self-assign publishes that to lock-free readers
 
 void updateGblCache(String lockT,Map v,Boolean v1){
 	String semName=sTGBL
 	String wName=sPAppId()
 	getTheLock(semName,lockT)
-	globalVarsVFLD[wName]=v
-	globalVarsVFLD=globalVarsVFLD
+	if(v!=null)globalVarsVFLD[wName]=v
+	else globalVarsVFLD.remove(wName)
 	initGlobalVFLD[wName]=v1
-	initGlobalVFLD=initGlobalVFLD
 	releaseTheLock(semName)
 	//if(eric())doLog(sDBG,lockT)
 }
@@ -9968,6 +10026,18 @@ private void loadGlobalCache(){
 	String wName=sPAppId()
 	if(!initGlobalVFLD[wName])
 		updateGblCache('loadGlobalCache',wlistAvailableVariables(),true)
+}
+
+/** this parent's global variable cache, (re)loading it if a clearGlobalCache intervened; may be null */
+private Map<String,Map> gtGlobalVars(String wName){
+	loadGlobalCache()
+	Map<String,Map> gv
+	gv=globalVarsVFLD[wName]
+	if(gv==null){
+		loadGlobalCache()
+		gv=globalVarsVFLD[wName]
+	}
+	return gv
 }
 
 @CompileStatic
@@ -9997,20 +10067,20 @@ private static String sanitizeVariableName(String name){
 @CompileStatic
 private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 	Map<String,String> var=parseVariableName(name)
-	String tn,mySt,rt
+	String tn,rt
 	tn=sanitizeVariableName(var[sNM])
-
-	mySt="get Variable ${name} ${var} ${tn} "
+	String tn0=tn
 	Boolean lge=isEric(r9)
+	// debug / error text built only when needed (getVariable is called for every variable read)
+	String mySt= lge ? "get Variable ${name} ${var} ${tn} ".toString() : sNL
 	if(lge) myDetail r9,mySt,i1
 	Map<String,Object> res
 	if(tn==sNL){
 		res=rtnMapE('Invalid empty variable name')
-		error mySt+sMv(res),r9
+		error "get Variable ${name} ${var} ${tn} ".toString()+sMv(res),r9
 		if(lge)myDetail r9,mySt+" result:$res"
 		return res
 	}
-	Map err=rtnMapE(mySt+"not found".toString())
 
 	Boolean rtnVarN,rtnLCL,isConst,isFixed
 	rtnVarN=false // return variable name
@@ -10035,16 +10105,16 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 				}
 				rtnVarN=true
 				res=rtnMap(typ,vl)
-			}else res=err
+			}else res=null
 			if(eric())debug "getVariable hub variable (${vn}) returning ${res} to webcore",r9
 		}else{
-			loadGlobalCache()
 			waddInUseGlobalVar(r9,tn,false)
 			String wName=sMs(r9,spId)
-			def tresult=globalVarsVFLD[wName][tn]
-			if(!(tresult instanceof Map))res=err
+			Map<String,Map> gv=gtGlobalVars(wName)
+			def tresult= gv!=null ? gv[tn]:null
+			if(!(tresult instanceof Map))res=null
 			else{
-				res=(Map)tresult
+				res= [:]+(Map)tresult as Map<String, Object> // copy: the cached variable is shared by all pistons
 				String t=sMt(res)
 				def v=oMv(res)
 				res[sV]= matchCast(v,t) ? v: cast(r9,v,t)
@@ -10082,7 +10152,7 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 				res=getPlaces(r9,tn.substring(i7))
 			}else{
 				def tres=r9[sSYSVARS][tn]
-				if(!(tres instanceof Map))res=err
+				if(!(tres instanceof Map))res=null
 				else{
 					res=(Map)tres
 					if(res!=null)res=rtnMap(sMt(res),gtSysVarVal(r9,tn))
@@ -10092,7 +10162,7 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 
 //			if(eric())doLog(sDBG,"getVariable ${r9.localVars}")
 			Map tlocV=mMs(mMs(r9,sLOCALV),tn)
-			if(!tlocV)res=err
+			if(!tlocV)res=null
 			else{
 				rtnLCL= rtnL
 				rtnVarN=true
@@ -10107,7 +10177,7 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 			}
 		}
 	}
-	if(res==null)res=err
+	if(res==null)res=rtnMapE("get Variable ${name} ${var} ${tn0} not found".toString())
 
 	rt= sMt(res)
 	if(rt.endsWith(sRB)){
@@ -10140,8 +10210,9 @@ private Map<String,Object> getVariable(Map r9,String name, Boolean rtnL=false){
 	}else{
 		rt=sMt(res)
 		if(rt==sDEC && v instanceof BigDecimal)v=v.toDouble()
-		res=rtnMap(rt,v) + ((rtnVarN ? [vn: tn] : [:]) as Map<String, Object>)
-		res= res + ((rtnLCL ? [ic: isConst, fx: isFixed] : [:]) as Map<String, Object>)
+		res=rtnMap(rt,v)
+		if(rtnVarN) res['vn']=tn
+		if(rtnLCL){ res['ic']=isConst; res['fx']=isFixed }
 	}
 	if(lge)myDetail r9,mySt+"result:$res (${myObj(v)})"
 	res
@@ -10152,9 +10223,9 @@ private Map setVariable(Map r9,String name,value){
 	Map<String,String> var=parseVariableName(name)
 	String tn,mySt
 	tn=sanitizeVariableName(var[sNM])
-	mySt="set Variable '${tn}' "
+	mySt="set Variable '"+tn+"' "
 	Map res; res=null
-	Map err; err=rtnMapE(mySt+'not found ')
+	Map err; err=null // built only on failure
 	Boolean lge=isEric(r9)
 	if(tn==sNL){
 		res=rtnMapE(mySt+'Invalid empty variable name')
@@ -10191,30 +10262,35 @@ private Map setVariable(Map r9,String name,value){
 						if(a){
 							res=rtnMap(wctyp,value)
 							if(lge)myDetail r9,"setVariable returning ${res} to webcore",iN2
-						}else err[sV]=mySt+'setGlobal failed'
+						}else err=rtnMapE(mySt+'setGlobal failed')
 					}
 					if(res)return res
-				}else err[sV]=mySt+'setGlobal unknown wctyp'
+				}else err=rtnMapE(mySt+'setGlobal unknown wctyp')
 			}
 		}else{
-			loadGlobalCache()
 			String lockTyp='setGlobalvar'
 			String semName=sTGBL
 			String wName=sMs(r9,spId)
 			waddInUseGlobalVar(r9,tn,false)
+			gtGlobalVars(wName)
 			getTheLock(semName,lockTyp)
-			def tvariable=globalVarsVFLD[wName][tn]
-			if(tvariable instanceof Map){
-				Map variable=(Map)tvariable
-				variable[sV]=cast(r9,value,sMt(variable))
-				globalVarsVFLD=globalVarsVFLD
-				Map<String,Map> cache=r9[sGVCACHE]!=null ? msMs(r9,sGVCACHE):[:]
-				cache[tn]=variable
-				r9[sGVCACHE]=cache
-				releaseTheLock(semName)
-				return variable
+			try{
+				// re-read under the lock: clearGlobalCache (same lock) may have removed it
+				Map<String,Map> gv=globalVarsVFLD[wName]
+				def tvariable= gv!=null ? gv[tn]:null
+				if(tvariable instanceof Map){
+					Map variable=(Map)tvariable
+					variable[sV]=cast(r9,value,sMt(variable)) // write-through to the shared cache, under the lock
+					globalVarsVFLD=globalVarsVFLD
+					Map ret=[:]+variable // callers / parent get a copy, not the shared map
+					Map<String,Map> cache=r9[sGVCACHE]!=null ? msMs(r9,sGVCACHE):[:]
+					cache[tn]=ret
+					r9[sGVCACHE]=cache
+					return ret
+				}
+			}finally{
+				releaseTheLock(semName) // also on exceptions, so the global lock is never leaked
 			}
-			releaseTheLock(semName)
 		}
 		// hubvars are removed via HE console -> settings
 		// global vars are removed by setting them to null via webcore dashboard
@@ -10261,6 +10337,7 @@ private Map setVariable(Map r9,String name,value){
 							if(lge)myDetail r9,"setVariable list found ${variable} value: ${nvalue}",iN2
 							variable[sV]= nvalue // this modifies r9[sLOCALV]
 						}else{
+							err=rtnMapE(mySt+'not found ')
 							if(isInf(r9))error sMv(err),r9
 							return err
 						}
@@ -10284,6 +10361,7 @@ private Map setVariable(Map r9,String name,value){
 			return variable
 		}
 	}
+	err=err ?: rtnMapE(mySt+'not found ')
 	error sMv(err),r9 // if you are trying to set something that does not exist, log error
 	return err
 }
@@ -10301,17 +10379,24 @@ private void clearVariable(Map r9,String n){
 @CompileStatic
 private void updateVariable(Map r9,String n, Map variable, Boolean clear=false){
 	Map<String,Object> vars
-	Map t0=getCachedMaps(sSTVAR)
-	if(t0!=null)vars=mMs(t0,sVARS)
-	else vars=isPep(r9) ? (Map)gtAS(sVARS):(Map)gtSt(sVARS)
-
-	if(clear) vars.remove(n)
-	else vars[n]=oMv(variable)
+	Map t0=getCachedFields(sSTVAR,[sVARS])
+	if(t0!=null){
+		// Cache is warm: copy-on-write under the lock, never mutate the shared cached map in place
+		String id=sMs(r9,snId)
+		getTheLock(id,sV)
+		Map nc=theCacheVFLD[id]
+		Map m0=nc ? mMs(nc,sVARS):mMs(t0,sVARS)
+		vars= m0!=null ? new LinkedHashMap<String,Object>(m0):new LinkedHashMap<String,Object>()
+		if(clear) vars.remove(n)
+		else vars[n]=oMv(variable)
+		if(nc)nc[sVARS]=vars
+		releaseTheLock(id)
+	}else{
+		vars=isPep(r9) ? (Map)gtAS(sVARS):(Map)gtSt(sVARS)
+		if(clear) vars.remove(n)
+		else vars[n]=oMv(variable)
+	}
 	mb()
-
-	// Cache is warm: update the in-memory cache; first
-	if(t0!=null)
-		updateCacheFld(r9,sVARS,vars,sV,false)
 
 	// update the Hubitat persistence always
 	if(isPep(r9))assignAS(sVARS,vars) // atomicState is immiediate for other readers (DB access on Hubitat)
@@ -10377,7 +10462,7 @@ Map proxyEvaluateExpression(LinkedHashMap mr9,Map expression,String dataType=sNL
 	try{
 		if(vars){
 			Map aS
-			aS=getCachedMaps('proxyEvaluateExpression glv')
+			aS=getCachedFields('proxyEvaluateExpression glv',[sVARS])
 			aS=aS!=null?aS:[:]
 			getLocalVariables(r9,aS,true,true, vars)
 		}
@@ -10508,10 +10593,10 @@ private String strEvalExpr(Map r9,Map express,String rtndataType=sSTR){
 private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 	//if dealing with an expression that has multiple items let's evaluate each item one by one
 	if(!express)return rtnMapE('Null expression')
-	Long time=wnow()
+	Boolean lge=isEric(r9)
+	Long time= lge ? wnow() : lZ // timing is only shown in the debug detail log
 	Map expression=simplifyExpression(express)
 	String mySt; mySt=sNL
-	Boolean lge=isEric(r9)
 	if(lge){
 		mySt="evaluateExpression $expression rtndataType: $rtndataType".toString()
 		myDetail r9,mySt,i1
@@ -10549,7 +10634,11 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 			result=rtnMapB(bcast(r9,exprV))
 			break
 		case sDYN:
-			if(rtndataType!=sSTR)break
+			if(rtndataType!=sSTR){
+				// no type requested: the node itself would be returned; give callers a copy, never the (shared, cached) piston code
+				if(!rtndataType) result=[:]+expression
+				break
+			}
 		case sSTR:
 		case sENUM:
 		case sERROR:
@@ -10574,8 +10663,8 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 			break
 		case sDEV:
 			if(exprV instanceof List){
-				//already parsed
-				result=expression
+				//already parsed; a copy so the shared, cached piston code is never handed out (or written) as a result
+				result= rtndataType ? expression : [:]+expression
 			}else{
 				Boolean err; err=false
 				def eid=expression[sID]
@@ -10839,15 +10928,8 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 								t2=t1
 							}
 						}
-						t1d= t1 in LT1
-						t2d= t2 in LT1
 						t1i= t1 in LN
 						t2i= t2 in LN
-						t1f= t1 in LD
-						t2f= t2 in LD
-						t1n=t1i||t1f
-						t2n=t2i||t2f
-						//warn "Precalc ($t1) $v1 $o ($t2) $v2 >>> t1d=$t1d, t2d=$t2d, t1n=$t1n, t2n=$t2n",r9
 
 						// *,/ ** require decimals
 						if(o in pn1){ //[sMULP,sDIV,sPWR,sMINUS] number fixes
@@ -10888,16 +10970,14 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 						}
 					}
 
-					//v1=evaluateExpression(r9,(Map)items[idx],t1).v
-					//v1=((Map)items[idx]).v   // already done
 					String tt1
 					tt1=sMt(items[idx])
-					if(!(v1!=null && tt1!=sNL && (t1==sNL || tt1==t1) && matchCast(v1,tt1))) v1=oMv(evaluateExpression(r9,items[idx],t1))
+					if(!(v1!=null && tt1!=sNL && (t1==sNL || tt1==t1) && matchCast(v1,tt1)))
+						v1= isPlainT(tt1) ? recastV(r9,v1,tt1,t1) : oMv(evaluateExpression(r9,items[idx],t1))
 					v1=v1==sSNULL ? null:v1
-					//v2=evaluateExpression(r9,(Map)items[idxPlus],t2).v
-					//v2=((Map)items[idxPlus]).v // already done
 					tt1=sMt(items[idxPlus])
-					if(!(v2!=null && tt1!=sNL && (t2==sNL || tt1==t2) && matchCast(v2,tt1))) v2=oMv(evaluateExpression(r9,items[idxPlus],t2))
+					if(!(v2!=null && tt1!=sNL && (t2==sNL || tt1==t2) && matchCast(v2,tt1)))
+						v2= isPlainT(tt1) ? recastV(r9,v2,tt1,t2) : oMv(evaluateExpression(r9,items[idxPlus],t2))
 					v2=v2==sSNULL ? null:v2
 
 					Boolean err;err=false
@@ -10962,114 +11042,103 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 			result=rtnMap(rtndataType,t1)+((ra ? [(sA):ra]:[:]) as Map)+((ri!=null ? [(sI):ri]:[:]) as Map)
 		}
 	}
-	result[sD]=elapseT(time)
-	if(lge)myDetail r9,mySt+" result:$result".toString()
+	// no timing key on the result: 'd' on values means a device id (okComp, valueWas, matched device lists, cache checks)
+	if(lge)myDetail r9,mySt+" result:$result (${elapseT(time)}ms)".toString()
 	return result
 }
 
+/** item types whose evaluateExpression is just a value normalize + cast (no device, variable, function or parse work) */
+@CompileStatic
+private static Boolean isPlainT(String tt){ return tt==sINT || tt==sLONG || tt==sDEC || tt==sBOOLN || tt==sSTR || tt==sTEXT }
+
+/** same value as oMv(evaluateExpression(r9,item,t)) for an already evaluated item of plain type tt (see isPlainT),
+ *  without re-running the whole node path (switch, result maps, timing) */
+@CompileStatic
+private Object recastV(Map r9,v,String tt,String t){
+	def nv
+	String t0
+	switch(tt){
+		case sBOOLN: nv=bcast(r9,v); t0=sBOOLN; break
+		case sSTR:
+		case sTEXT: nv=scast(r9,v); t0=sSTR; break
+		default: nv=v; t0=tt // sINT, sLONG, sDEC are taken as is
+	}
+	if(!t)return nv
+	Boolean match
+	match=(t in LS && t0 in LS && nv instanceof String)
+	if(!match && t==t0) match=matchCast(nv,t) || matchCastD(nv,t)
+	return match ? nv : cast(r9,nv,t,t0)
+}
+
 private doExprMath(Map r9,String o,String t,v1,v2){
-	def v; v=null
-	//if(isEric(r9)) myDetail r9,"doExprMath: o: $o type: $t, v1: $v1 (${myObj(v1)}) v2: $v2 (${myObj(v2)})",iN2
 	switch(o){
 		case sQM:
 		case sCLN:
 			error "Invalid ternary operator. Ternary operator's syntax is (condition ? trueValue:falseValue ). Please check your syntax.",r9
-			v=sBLK
-			break
+			return sBLK
 		case sMINUS:
-			v=v1 - v2
-			break
+			return v1 - v2
 		case sMULP:
-			v=v1 * v2
-			break
+			return v1 * v2
 		case sDIV:
-			v=(v2!=dZ ? v1/v2:dZ)
-			break
+			return (v2!=dZ ? v1/v2:dZ)
 		case sMOD1:
-			v=Math.floor(v2!=iZ ? v1/v2:dZ).toLong()
-			break
+			return Math.floor(v2!=iZ ? v1/v2:dZ).toLong()
 		case sMOD:
-			v=(Long)(v2!=iZ ? v1%v2:lZ)
-			break
+			return (Long)(v2!=iZ ? v1%v2:lZ)
 		case sPWR:
-			v=v1 ** v2
-			break
+			return v1 ** v2
 		case sAMP:
-			v=v1 & v2
-			break
+			return v1 & v2
 		case sBOR:
-			v=v1 | v2
-			break
+			return v1 | v2
 		case sBXOR:
-			v=v1 ^ v2
-			break
+			return v1 ^ v2
 		case sBNAND:
-			v=~(v1 & v2)
-			break
+			return ~(v1 & v2)
 		case sBNOR:
-			v=~(v1 | v2)
-			break
+			return ~(v1 | v2)
 		case sBNXOR:
-			v=~(v1 ^ v2)
-			break
+			return ~(v1 ^ v2)
 		case sBNOT:
-			v=~v2
-			break
+			return ~v2
 		case sSBL:
-			v=v1 << v2
-			break
+			return v1 << v2
 		case sSBR:
-			v=v1 >> v2
-			break
+			return v1 >> v2
 		case sLAND:
-			v=!!v1 && !!v2
-			break
+			return !!v1 && !!v2
 		case sLOR:
-			v=!!v1 || !!v2
-			break
+			return !!v1 || !!v2
 		case sLXOR:
-			v=!v1!=!v2
-			break
+			return !v1!=!v2
 		case sLNAND:
-			v=!(!!v1 && !!v2)
-			break
+			return !(!!v1 && !!v2)
 		case sLNOR:
-			v=!(!!v1 || !!v2)
-			break
+			return !(!!v1 || !!v2)
 		case sLNXOR:
-			v=!(!v1!=!v2)
-			break
+			return !(!v1!=!v2)
 		case sEQ:
-			v=v1==v2
-			break
+			return v1==v2
 		case sNEQ:
 		case sNEQA:
-			v=v1!=v2
-			break
+			return v1!=v2
 		case sLTH:
-			v=v1<v2
-			break
+			return v1<v2
 		case sGTH:
-			v=v1>v2
-			break
+			return v1>v2
 		case sLTHE:
-			v=v1<=v2
-			break
+			return v1<=v2
 		case sGTHE:
-			v=v1>=v2
-			break
+			return v1>=v2
 		case sNEG:
-			v=!v2
-			break
+			return !v2
 		case sDNEG:
-			v=!!v2
-			break
+			return !!v2
 		case sPLUS:
 		default:
-			v=t==sSTR ? "$v1$v2".toString():v1+v2
-			break
+			return t==sSTR ? "$v1$v2".toString():v1+v2
 	}
-	return v
 }
 
 @CompileStatic
@@ -11299,11 +11368,11 @@ private Map func_tan(Map r9,List<Map> prms){
 	rtnMapD(Math.tan(dblEvalExpr(r9,prms[iZ]) ))
 }
 
-/** atan2 converts a decimal to angle theta decimal value			**/
-/** Usage: atan2(integer or decimal or string)			**/
+/** atan2 converts y,x to angle theta (radians)			**/
+/** Usage: atan2(y, x)			**/
 private Map func_atan2(Map r9,List<Map> prms){
-	if(badParams(prms,i1))return rtnErr('atan2'+sINTDECSTR)
-	rtnMapD(Math.atan2(dblEvalExpr(r9,prms[iZ]) ))
+	if(badParams(prms,i2))return rtnErr('atan2(y, x)')
+	rtnMapD(Math.atan2(dblEvalExpr(r9,prms[iZ]), dblEvalExpr(r9,prms[i1]) ))
 }
 
 /** log converts a decimal to natural logarithm decimal value		**/
@@ -11661,33 +11730,34 @@ private List listIt(Map r9,List<Map> prms,String t,String typ){
 /** Usage: avg(values)								**/
 private Map func_avg(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnErr(sAVG+sVALUEN)
-	Double s; s=dZ
+	List<Double> v=aggVals(r9,prms)
+	if(!v)return rtnErr(sAVG+sVALUEN)
+	rtnMapD((Double)v.sum()/v.size())
+}
 
+/** single list/string param: its items, else null */
+private List aggList(Map r9,List<Map> prms){
+	if(!prms)return null
 	String t= sMt(prms[iZ])
-	String typ; typ=t.replace(sLRB,sBLK)
-	Integer i,sz; sz=prms.size()
-	if(isLiStr(t,typ,sz)){
-		List res= listIt(r9,prms,t,typ)
-		sz=res.size()
-		if(sz){
-			for(i=iZ;i<sz;i++){ s+=res[i] }
-			return rtnMapD(s/sz)
-		}else return rtnErr(sAVG+sVALUEN)
-	}
-	for(Map prm in prms) s+=dblEvalExpr(r9,prm)
-	rtnMapD(s/sz)
+	String typ=t.replace(sLRB,sBLK)
+	return isLiStr(t,typ,prms.size()) ? listIt(r9,prms,t,typ) : null
+}
+
+/** numeric values of a single list/string param, or of each param */
+private List<Double> aggVals(Map r9,List<Map> prms){
+	List l=aggList(r9,prms)
+	if(l!=null) return l.collect{ dcast(r9,it) }
+	return prms.collect{ Map it -> dblEvalExpr(r9,it) }
 }
 
 /** median returns the value in the middle of a sorted array of numeric values			**/
 /** Usage: median(values)							**/
 private Map func_median(Map r9,List<Map> prms){
-
 	String s='median'+sVALUEN
-	String t= sMt(prms[iZ])
-	String typ; typ=t.replace(sLRB,sBLK)
-	Integer i,sz; sz=prms.size()
-	if(isLiStr(t,typ,sz)){
-		List res= listIt(r9,prms,t,typ).sort()
+	Integer i,sz; sz=prms ? prms.size():iZ
+	List res=aggList(r9,prms)
+	if(res!=null){
+		res=res.sort()
 		sz=res.size()
 		if(sz>i1){
 			i=Math.floor(sz/i2).toInteger()
@@ -11706,18 +11776,10 @@ private Map mostleast(Map r9,List<Map> prms, String s, Boolean least){
 	if(badParams(prms,i1))return rtnErr(s+sVALUEN)
 	Map<Object,Map> data=[:]
 
-	String t= sMt(prms[iZ])
-	String typ; typ=t.replace(sLRB,sBLK)
-	Integer i,sz; sz=prms.size()
-	if(isLiStr(t,typ,sz)){
-		List res= listIt(r9,prms,t,typ)
-		sz=res.size()
-		if(sz){
-			for(i=iZ;i<sz;i++){
-				def v=res[i]
-				data[v]=rtnMap(sDYN,v)+[(sC):(data[v]?.c ?: iZ)+i1]
-			}
-		}else return rtnErr(s+sVALUEN)
+	List res=aggList(r9,prms)
+	if(res!=null){
+		if(!res)return rtnErr(s+sVALUEN)
+		for(v in res) data[v]=rtnMap(sDYN,v)+[(sC):(data[v]?.c ?: iZ)+i1]
 	}else{
 
 		for(Map prm in prms){
@@ -11747,58 +11809,19 @@ private Map func_most(Map r9,List<Map> prms){
 /** Usage: sum(values)								**/
 private Map func_sum(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnErr('sum'+sVALUEN)
-	Double s; s=dZ
-
-	String t= sMt(prms[iZ])
-	String typ; typ=t.replace(sLRB,sBLK)
-	Integer i,sz; sz=prms.size()
-	if(isLiStr(t,typ,sz)){
-		List res= listIt(r9,prms,t,typ)
-		sz=res.size()
-		if(sz){
-			for(i=iZ;i<sz;i++){ s+=res[i] }
-			return rtnMapD(s)
-		}else return rtnMapD(s)
-	}
-	for(Map prm in prms) s+=dblEvalExpr(r9,prm)
-	rtnMapD(s)
+	List<Double> v=aggVals(r9,prms)
+	rtnMapD(v ? (Double)v.sum() : dZ)
 }
 
 /** variance calculates the [population] variance of a series of numeric values	**/
 /** Usage: variance(values)							**/
 private Map func_variance(Map r9,List<Map> prms){
-	Double sum,value
-	sum=dZ
-	List values=[]
-
-	String s='variance'+sVALUEN
-	String t= sMt(prms[iZ])
-	String typ; typ=t.replace(sLRB,sBLK)
-	Integer i,sz; sz=prms.size()
-	if(isLiStr(t,typ,sz)){
-		List res= listIt(r9,prms,t,typ)
-		sz=res.size()
-		if(sz>i1){
-			for(i=iZ;i<sz;i++){
-				def v=res[i]
-				values.push(v)
-				sum+=v
-			}
-		}else return rtnErr(s)
-	}else{
-
-		if(badParams(prms,i2))return rtnErr(s)
-		for(Map prm in prms){
-			value=dblEvalExpr(r9,prm)
-			values.push(value)
-			sum+=value
-		}
-	}
-
-	Double avg=sum/sz
-	sum=dZ
-	for(i=iZ;i<sz;i++) sum+=((values[i] as Double) -avg)**i2
-	rtnMapD(sum/sz)
+	if(!prms)return rtnErr('variance'+sVALUEN)
+	List<Double> v=aggVals(r9,prms)
+	Integer sz=v.size()
+	if(sz<i2)return rtnErr('variance'+sVALUEN)
+	Double avg=(Double)v.sum()/sz
+	rtnMapD((Double)v.collect{ Double it -> (it-avg)**i2 }.sum()/sz)
 }
 
 /** stdev calculates the [population] standard deviation of a series of numeric values	**/
@@ -11888,70 +11911,34 @@ private Map func_hsltohex(Map r9,List<Map> prms){
 /** Usage: count(values)										**/
 private Map func_count(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnMapI(iZ)
-	Integer n,i
-	Integer sz; sz=prms.size()
-	n=iZ
-	if(sz==i1){
-		String t= sMt(prms[iZ])
-		String tt1=t.replace(sLRB,sBLK)
-
-		if(t!=tt1 || t in ListSTRDYN){
-			Map m; m=null
-			List list
-			def a= oMv(prms[iZ])
-			if(t!=tt1){ //input is a list or map type
-				list= a instanceof List ? (List)a : null
-				m= a instanceof Map ? (Map)a : null
-			}else
-				list=strEvalExpr(r9,prms[iZ]).split(sCOMMA)
-
-			Boolean t1
-			if(m){
-				for(Map.Entry j in m){
-					//if(isEric(r9)) myDetail r9,"j.value is $j.value ${myObj(j.value)}",iN2
-					t1=bcast(r9,j.value)
-					n+=t1 ? i1:iZ
-				}
-			}else{
-				sz=list.size()
-				for(i=iZ; i<sz; i++){
-					t1=bcast(r9,list[i])
-					n+=t1 ? i1:iZ
-				}
-			}
-			return rtnMapI(n)
-		}
+	Integer n; n=iZ
+	def a=oneListOrMap(r9,prms)
+	if(a!=null){
+		for(v in (a instanceof Map ? ((Map)a).values() : (List)a)) n+=bcast(r9,v) ? i1:iZ
+		return rtnMapI(n)
 	}
 	for(Map prm in prms) n+=boolEvalExpr(r9,prm) ? i1:iZ
 	rtnMapI(n)
+}
+
+/** single list, map, or comma separated string param: its Map or List (null list if not a list type), else null */
+private Object oneListOrMap(Map r9,List<Map> prms){
+	if(prms.size()!=i1)return null
+	String t= sMt(prms[iZ])
+	String tt1=t.replace(sLRB,sBLK)
+	if(t!=tt1){ //input is a list or map type
+		def a= oMv(prms[iZ])
+		return a instanceof Map ? a : (a instanceof List ? a : [])
+	}
+	return t in ListSTRDYN ? strEvalExpr(r9,prms[iZ]).split(sCOMMA) as List : null
 }
 
 /** size returns the number of values provided				**/
 /** Usage: size(values)							**/
 private Map func_size(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnMapI(iZ)
-	Integer sz=prms.size()
-	if(sz==i1){
-		Integer n
-		String t= sMt(prms[iZ])
-		String tt1=t.replace(sLRB,sBLK)
-		//if(eric1())myDetail r9,"size t: ${t} tt1: $tt1",iN2
-		if(t!=tt1 || t in ListSTRDYN){
-			Map m; m=null
-			List list
-			def a= oMv(prms[iZ])
-			//if(eric1())myDetail r9,"a is ${myObj(a)}",iN2
-			if(t!=tt1){ //input is a list or map type
-				list= a instanceof List ? (List)a : null
-				m= a instanceof Map ? (Map)a : null
-			}else
-				list=strEvalExpr(r9,prms[iZ]).split(sCOMMA)
-			if(m) n=m.size()
-			else n=list.size()
-			return rtnMapI(n)
-		}
-	}
-	rtnMapI(sz)
+	def a=oneListOrMap(r9,prms)
+	rtnMapI(a!=null ? (a instanceof Map ? ((Map)a).size() : ((List)a).size()) : prms.size())
 }
 
 /** age returns the number of milliseconds an attribute had the current value	**/
@@ -11976,88 +11963,59 @@ private Map func_age(Map r9,List<Map> prms){
 /** Usage: previousAge([device:attribute])							**/
 private Map func_previousage(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnErr('previousAge'+sDATTRH)
-	Map prm=evaluateExpression(r9,prms[iZ],sDEV)
-	if(sMt(prm)==sDEV && sMa(prm) && liMv(prm).size()){
-		def device=getDevice(r9,sLi(liMv(prm),iZ))
-		if(device!=null && !isDeviceLocation(device)){
-			List<State> states=(List<State>)device.statesSince(sMa(prm),new Date(elapseT(604500000L)),[max:i5])
-			Integer sz=states.size()
-			if(sz>i1){
-				def newValue=states[iZ].getValue()
-				//some events get duplicated look for the last "different valued" state
-				Integer i
-				for(i=i1; i<sz; i++){
-					if(states[i].getValue()!=newValue){
-						Long res=elapseT(((Date)states[i].getDate()).getTime())
-						return rtnMap(sLONG,res)
-					}
-				}
-			}
-			//saying 7 days though it may be wrong- but we have no data
-			return rtnMap(sLONG,604800000L)
-		}
-	}
-	rtnMapE('Invalid device')
+	Map p=prevState(r9,prms)
+	if(p==null)return rtnMapE('Invalid device')
+	State st=(State)p[sS]
+	//no previous value: saying 7 days though it may be wrong- but we have no data
+	return rtnMap(sLONG, st ? elapseT(((Date)st.getDate()).getTime()) : 604800000L)
 }
 
 /** previousValue returns the previous value of the attribute				**/
 /** Usage: previousValue([device:attribute])						**/
 private Map func_previousvalue(Map r9,List<Map> prms){
 	if(badParams(prms,i1))return rtnErr('previousValue'+sDATTRH)
+	Map p=prevState(r9,prms)
+	if(p==null)return rtnMapE('Invalid device')
+	State st=(State)p[sS]
+	if(!st)return rtnMapS(sBLK) //saying no value- we have no data
+	String t=sMt(devAttrT(sMs(p,sA),p[sD]))
+	return rtnMap(t,cast(r9,st.getValue(),t))
+}
+
+/** [device:attribute] param: d: device, a: attribute, s: last state (past ~7 days) whose value differs from the current one, or null; null if not a valid device */
+private Map prevState(Map r9,List<Map> prms){
 	Map prm=evaluateExpression(r9,prms[iZ],sDEV)
 	if(sMt(prm)==sDEV && sMa(prm) && liMv(prm).size()){
 		def device=getDevice(r9,sLi(liMv(prm),iZ))
-		Map attribute=devAttrT(sMa(prm),device)
 		if(device!=null && !isDeviceLocation(device)){
 			List<State> states=(List<State>)device.statesSince(sMa(prm),new Date(elapseT(604500000L)),[max:i5])
-			Integer sz=states.size()
-			if(sz>i1){
-				def newValue=states[iZ].getValue()
-				//some events get duplicated want to look for the last "different valued" state
-				Integer i
-				for(i=i1; i<sz; i++){
-					def res=states[i].getValue()
-					if(res!=newValue){
-						String t=sMt(attribute)
-						return rtnMap(t,cast(r9,res,t))
-					}
-				}
-			}
-			//saying no value- we have no data
-			return rtnMapS(sBLK)
+			//some events get duplicated look for the last "different valued" state
+			def newValue= states ? states[iZ].getValue() : null
+			return [(sD):device,(sA):sMa(prm),(sS):states?.drop(i1)?.find{ State it -> it.getValue()!=newValue }]
 		}
 	}
-	rtnMapE('Invalid device')
+	return null
 }
 
 /** newer returns the number of devices whose attribute had the current		**/
 /** value for less than the specified number of milliseconds			**/
 /** Usage: newer([device:attribute] [,.., [device:attribute]],threshold)	**/
-private Map func_newer(Map r9,List<Map> prms){
-	if(badParams(prms,i2))return rtnErr('newer'+sDATTRHT)
-	Integer t0=prms.size()-i1
-	Long threshold=longEvalExpr(r9,prms[t0],sLONG)
-	Integer res,i
-	res=iZ
-	for(i=iZ; i<t0; i++){
-		Map age=func_age(r9,[prms[i]])
-		if(!isErr(age) && lMs(age,sV)<threshold)res++
-	}
-	rtnMapI(res)
-}
+private Map func_newer(Map r9,List<Map> prms){ return newerOlder(r9,prms,true) }
 
 /** older returns the number of devices whose attribute had the current		**/
 /** value for more than the specified number of milliseconds			**/
 /** Usage: older([device:attribute] [,.., [device:attribute]],threshold)	**/
-private Map func_older(Map r9,List<Map> prms){
-	if(badParams(prms,i2))return rtnErr('older'+sDATTRHT)
+private Map func_older(Map r9,List<Map> prms){ return newerOlder(r9,prms,false) }
+
+private Map newerOlder(Map r9,List<Map> prms,Boolean newer){
+	if(badParams(prms,i2))return rtnErr((newer ? 'newer':'older')+sDATTRHT)
 	Integer t0=prms.size()-i1
 	Long threshold=longEvalExpr(r9,prms[t0],sLONG)
 	Integer res,i
 	res=iZ
 	for(i=iZ; i<t0; i++){
 		Map age=func_age(r9,[prms[i]])
-		if(!isErr(age) && lMs(age,sV)>=threshold)res++
+		if(!isErr(age) && (lMs(age,sV)<threshold)==newer)res++
 	}
 	rtnMapI(res)
 }
@@ -12131,36 +12089,27 @@ private Map func_eq(Map r9,List<Map> prms){
 
 /** lt returns true if value1<value2						**/
 /** Usage: lt(value1, value2)							**/
-private Map func_lt(Map r9,List<Map> prms,Boolean not=false){
-	if(badParams(prms,i2))return rtnErr('lt(value1, value2)')
-	Map value1=evaluateExpression(r9,prms[iZ])
-	Map value2=evaluateExpression(r9,prms[i1],sMt(value1))
-	Boolean a= (oMv(value1)<oMv(value2))
-	rtnMapB( not ? !a:a)
-}
+private Map func_lt(Map r9,List<Map> prms){ return cmpFunc(r9,prms,'lt',true,false) }
 
 /** ge returns true if value1>=value2						**/
 /** Usage: ge(value1, value2)							**/
-private Map func_ge(Map r9,List<Map> prms){
-	if(badParams(prms,i2))return rtnErr('ge(value1, value2)')
-	func_lt(r9,prms,true)
-}
+private Map func_ge(Map r9,List<Map> prms){ return cmpFunc(r9,prms,'ge',true,true) }
 
 /** gt returns true if value1>value2						**/
 /** Usage: gt(value1, value2)							**/
-private Map func_gt(Map r9,List<Map> prms,Boolean not=false){
-	if(badParams(prms,i2))return rtnErr('gt(value1, value2)')
-	Map value1=evaluateExpression(r9,prms[iZ])
-	Map value2=evaluateExpression(r9,prms[i1],sMt(value1))
-	Boolean a= (oMv(value1)>oMv(value2))
-	rtnMapB( not ? !a:a)
-}
+private Map func_gt(Map r9,List<Map> prms){ return cmpFunc(r9,prms,'gt',false,false) }
 
 /** le returns true if value1<=value2						**/
 /** Usage: le(value1, value2)							**/
-private Map func_le(Map r9,List<Map> prms){
-	if(badParams(prms,i2))return rtnErr('le(value1, value2)')
-	func_gt(r9,prms,true)
+private Map func_le(Map r9,List<Map> prms){ return cmpFunc(r9,prms,'le',false,true) }
+
+/** compare value1 < (lt) or > value2, optionally negated */
+private Map cmpFunc(Map r9,List<Map> prms,String nm,Boolean lt,Boolean not){
+	if(badParams(prms,i2))return rtnErr(nm+'(value1, value2)')
+	Map value1=evaluateExpression(r9,prms[iZ])
+	Map value2=evaluateExpression(r9,prms[i1],sMt(value1))
+	Boolean a= lt ? oMv(value1)<oMv(value2) : oMv(value1)>oMv(value2)
+	rtnMapB( not ? !a:a)
 }
 
 /** not returns the negative Boolean value					**/
@@ -12567,8 +12516,24 @@ private Map func_encodeuricomponent(Map r9,List prms){ return func_urlencode(r9,
 
 /** COMMON PUBLISHED METHODS							**/
 
-private String mem(Boolean showBytes=true){
-	Integer bytes=state.toString().length()
+// last measured state size per piston: appId -> [b: chars, t: measured at]
+@Field static final ConcurrentHashMap<String,Map> stSizeFLD=new ConcurrentHashMap<String,Map>()
+@Field static final Long lSTSIZEW=60000L	// updateLogs: reuse a measurement this recent if well under the limit
+@Field static final Long lMEMW=300000L		// finalizeEvent: refresh the dashboard memory figure at most this often
+
+/** size of state in chars. Serializes all of state, so per-execution callers pass maxAge to reuse a recent measurement */
+private Integer stateBytes(Long maxAge=lZ){
+	String id=sAppId()
+	Long now=wnow()
+	Map m=stSizeFLD[id]
+	if(maxAge>lZ && m!=null && now-lMt(m)<=maxAge)return (Integer)m[sB]
+	Integer b=state.toString().length()
+	stSizeFLD[id]=[(sB):b,(sT):now] as Map
+	return b
+}
+
+private String mem(Boolean showBytes=true,Long maxAge=lZ){
+	Integer bytes=stateBytes(maxAge)
 	return Math.round(d100*(bytes/100000.0D))+"%${showBytes ? " ($bytes bytes)".toString():sBLK}"
 }
 
@@ -12601,8 +12566,12 @@ private Long gtWCTimeToday(Map r9,Long time){
 	return Math.round( (res+(tz.getOffset(t0)-tz.getOffset(res)) ) *d1)
 }
 
-@Field static final List<String> trueStrings= [ '1','true', "on", "open",  "locked",  "active",  "wet",           "detected",    "present",    "occupied",    "muted",  "sleeping"]
-@Field static final List<String> falseStrings=[ '0','false',"off","closed","unlocked","inactive","dry","clear",   "not detected","not present","not occupied","unmuted","not sleeping","null"]
+// precompiled: String.replaceAll/replaceFirst would compile the regex on every cast
+@Field static final Pattern pNONNUM=Pattern.compile(/[^-\d.eE]/)
+@Field static final Pattern pTRAILZ=Pattern.compile(/(?:\.|(\.\d*?))0+$/)
+// HashSets: 'in' is a hash lookup instead of a list scan
+@Field static final Set<String> trueStrings= [ '1','true', "on", "open",  "locked",  "active",  "wet",           "detected",    "present",    "occupied",    "muted",  "sleeping"] as HashSet<String>
+@Field static final Set<String> falseStrings=[ '0','false',"off","closed","unlocked","inactive","dry","clear",   "not detected","not present","not occupied","unmuted","not sleeping","null"] as HashSet<String>
 
 @CompileStatic
 private static Map dataT(ival,String isrcDT){
@@ -12610,7 +12579,7 @@ private static Map dataT(ival,String isrcDT){
 	String srcDt; srcDt=isrcDT
 	Boolean isfbd; isfbd=false
 	value=(value instanceof GString)? "$value".toString():value //get rid of GStrings
-	if(srcDt==sNL || srcDt.length()==iZ || srcDt in [sBOOLN,sDYN]){
+	if(srcDt==sNL || srcDt.length()==iZ || srcDt==sBOOLN || srcDt==sDYN){
 		if(value instanceof List)srcDt=sDEV
 		else if(value instanceof Boolean)srcDt=sBOOLN
 		else if(value instanceof String)srcDt=sSTR
@@ -12633,7 +12602,7 @@ private static Map dataT(ival,String isrcDT){
 }
 
 @CompileStatic
-private static objVal(ival, String rtype){
+private static Object objVal(ival, String rtype){
 	Map rr=dataT(ival,sNL)
 	return com_cast(oMv(rr), rtype, sMs(rr,sS))
 }
@@ -12685,7 +12654,7 @@ private String scast(Map r9,v){
 	if(v instanceof Boolean) return (Boolean)v ? sTRUE:sFALSE
 	if(v instanceof Double){
 		// strip trailing zeroes (same as cast sSTR/sDEC path)
-		return v.toString().replaceFirst(/(?:\.|(\.\d*?))0+$/,'$1')
+		return pTRAILZ.matcher(v.toString()).replaceFirst('$1')
 	}
 	if(v instanceof GString) return v.toString()
 	Map rr=dataT(v,sNL)
@@ -12695,21 +12664,17 @@ private String scast(Map r9,v){
 }
 
 @CompileStatic
-private static com_cast(ival,String dataType,String srcDt){
+private static Object com_cast(ival,String dataType,String srcDt){
 	def value=ival
 	switch(dataType){
 		case sDEC:
 			switch(srcDt){
 				case sSTR:
-					String s=((String)value).replaceAll(/[^-\d.eE]/,sBLK)
-					if(s.isDouble() || s.isFloat())
-						return s.toDouble()
-					if(s.isLong())
-						return s.toLong().toDouble()
-					if(s.isInteger())
-						return s.toInteger().toDouble()
-					if(s in trueStrings)
-						return d1
+					String w=((String)value).toLowerCase().trim()
+					if(w in trueStrings) return d1 // e.g. 'on', 'open', 'active'
+					if(w in falseStrings) return dZ
+					String s=pNONNUM.matcher((String)value).replaceAll(sBLK)
+					try{ return Double.parseDouble(s) }catch(ignored){} // also covers long/integer strings
 					break
 				case sBOOLN: return (Double)(value ? d1:dZ)
 			}
@@ -12723,13 +12688,13 @@ private static com_cast(ival,String dataType,String srcDt){
 		case sINT:
 			switch(srcDt){
 				case sSTR:
-					String s=((String)value).replaceAll(/[^-\d.eE]/,sBLK)
+					String w=((String)value).toLowerCase().trim()
+					if(w in trueStrings) return i1
+					if(w in falseStrings) return iZ
+					String s=pNONNUM.matcher((String)value).replaceAll(sBLK)
 					if(s.isInteger())
 						return s.toInteger()
-					if(s.isFloat())
-						return Math.floor(s.toDouble()).toInteger()
-					if(s in trueStrings)
-						return i1
+					try{ return Math.floor(Double.parseDouble(s)).toInteger() }catch(ignored){}
 					break
 				case sBOOLN: return (Integer)(value ? i1:iZ)
 			}
@@ -12758,13 +12723,13 @@ private static com_cast(ival,String dataType,String srcDt){
 		case sLONG:
 			switch(srcDt){
 				case sSTR:
-					String s=((String)value).replaceAll(/[^-\d.eE]/,sBLK)
-					if(s.isLong() || s.isInteger())
+					String w=((String)value).toLowerCase().trim()
+					if(w in trueStrings) return l1
+					if(w in falseStrings) return lZ
+					String s=pNONNUM.matcher((String)value).replaceAll(sBLK)
+					if(s.isLong())
 						return s.toLong()
-					if(s.isFloat())
-						return Math.floor(s.toDouble()).toLong()
-					if(s in trueStrings)
-						return l1
+					try{ return Math.floor(Double.parseDouble(s)).toLong() }catch(ignored){}
 					break
 				case sBOOLN: return (value ? l1:lZ)
 			}
@@ -12779,6 +12744,7 @@ private static com_cast(ival,String dataType,String srcDt){
 	return value
 }
 
+@CompileStatic
 private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 	if(dataTT==sDYN)return ival
 
@@ -12811,7 +12777,7 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 				case sBOOLN: return value ? sTRUE:sFALSE
 				case sDEC:
 					// strip trailing zeroes (e.g. 5.00 to 5 and 5.030 to 5.03)
-					return value.toString().replaceFirst(/(?:\.|(\.\d*?))0+$/,'$1')
+					return pTRAILZ.matcher(value.toString()).replaceFirst('$1')
 				case sINT:
 				case sLONG: break
 				case sTIME: return formatLocalTime(r9,value,'h:mm:ss a z')
@@ -12838,7 +12804,7 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 		case sDATE:
 		case sDTIME:
 			Long d
-			if(srcDt in [sTIME,sLONG,sINT,sDEC]){
+			if(srcDt==sTIME || srcDt==sLONG || srcDt==sINT || srcDt==sDEC){
 				d=((Number)value).toLong()
 				if(d<lMSDAY) value=gtWCTimeToday(r9,d)
 				else value=d
@@ -12855,9 +12821,13 @@ private Object cast(Map r9,ival,String dataTT,String isrcDT=sNL){
 			return d
 		case sVEC:
 			if(srcDt==sSTR) value= fixVector((String)value)
-			return value instanceof Map && value!=null && value[sX]!=null && value[sY]!=null && value[sZ]!=null ? value:[(sX):iZ,(sY):iZ,(sZ):iZ]
+			if(value instanceof Map){
+				Map m=(Map)value
+				if(m[sX]!=null && m[sY]!=null && m[sZ]!=null) return m
+			}
+			return [(sX):iZ,(sY):iZ,(sZ):iZ]
 		case sORIENT:
-			return value instanceof Map ? getThreeAxisOrientation(value):value
+			return value instanceof Map ? getThreeAxisOrientation((Map)value):value
 		case sMS:
 		case sS:
 		case sM:
@@ -12937,7 +12907,6 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 	Long lnull=(Long)null
 	Long res
 	res=lnull
-	Integer n; n=iZ
 	//SimpleDateFormat
 	def a=dateOrTimeOrString
 	try{
@@ -12946,86 +12915,46 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 			Long tt= aa.toLong()
 			if(tt<lMSDAY){
 				res=gtWCTimeToday(r9,tt)
-				n=i1
 			}else{
 // deal with a time in sec (vs. ms)
 				Long span=63072000L // Math.round(730*(dMSDAY/d1000)) // 2 years in secs
 				Long nowInsecs=Math.round((wnow()/lTHOUS).toDouble())
-				if(tt<(nowInsecs+span) && tt>(nowInsecs-span)){
-					res=tt*lTHOUS
-					n=i2
-				}
+				if(tt<(nowInsecs+span) && tt>(nowInsecs-span)) res=tt*lTHOUS
 			}
-			if(res==lnull){
-				res=tt
-				n=i3
-			}
+			if(res==lnull) res=tt
 		}
 	}catch(ignored){}
 
 	if(res==lnull && dateOrTimeOrString instanceof String){
 		String sdate=dateOrTimeOrString
-		n=i4
-		try{
-			Date tt1=wtoDateTime(sdate)
-			res=tt1.getTime()
-		}catch(ignored){ res=lnull }
-
+		try{ res=wtoDateTime(sdate).getTime() }catch(ignored){}
 
 		// additional ISO 8601 that Hubitat does not parse
 		if(res==lnull){
-			n=i5
-			try{
-				String tt=sdate
-				def regex1=/Z/
-				String tt0=tt.replaceAll(regex1," -0000")
-				res=(new Date()).parse("yyyy-MM-dd'T'HH:mm z",tt0).getTime()
-			}catch(ignored){ res=lnull }
+			try{ res=(new Date()).parse("yyyy-MM-dd'T'HH:mm z",sdate.replaceAll(/Z/," -0000")).getTime() }catch(ignored){}
 		}
 
 		// next 3 format local time formatting done by cast
 		if(res==lnull){
-			n=14
-			try{
-				res=(new Date()).parse( 'EEE, MMM d yyyy @ h:mm:ss a z',sdate).getTime()
-			}catch(ignored){ res=lnull }
+			for(String fmt in ['EEE, MMM d yyyy @ h:mm:ss a z','EEE, MMM d yyyy','h:mm:ss a z']){
+				try{ res=(new Date()).parse(fmt,sdate).getTime(); break }catch(ignored){}
+			}
 		}
 
 		if(res==lnull){
-			n=i15
-			try{
-				res=(new Date()).parse( 'EEE, MMM d yyyy',sdate).getTime()
-			}catch(ignored){ res=lnull }
+			try{ res=(new Date()).parse(sdate) }catch(ignored){}
 		}
 
 		if(res==lnull){
-			n=i16
-			try{
-				res=(new Date()).parse( 'h:mm:ss a z',sdate).getTime()
-			}catch(ignored){ res=lnull }
-		}
-
-		if(res==lnull){
-			n=i6
-			try{
-				res=(new Date()).parse(sdate)
-			}catch(ignored){ res=lnull }
-		}
-
-		if(res==lnull){
-			n=i7
 			try{
 				//get unix time
-				//if(!(sdate =~ /(\s[A-Z]{3}([+\-][0-9]{2}:[0-9]{2}|\s[0-9]{4})?$)/)){
 				if(!(sdate =~ /(\s[A-Z]{3}([+\-]\d{2}:\d{2}|\s\d{4})?$)/)){
-					Long newDate=(new Date()).parse(sdate+sSPC+formatLocalTime(r9,wnow(),'Z'))
-					res=newDate
+					res=(Long)(new Date()).parse(sdate+sSPC+formatLocalTime(r9,wnow(),'Z'))
 				}
-			}catch(ignored){ res=lnull }
+			}catch(ignored){}
 		}
 
 		if(res==lnull){
-			n=i8
 			try{
 				TimeZone tz
 				tz=rTZ(r9)
@@ -13038,75 +12967,39 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 					}catch(ignored){}
 				}
 
-				t0=nsdate?.trim() ?: sBLK
-				t0=t0.toLowerCase()
-				Boolean hasMeridian,hasAM,hasPM
-				hasMeridian=false
-				hasAM=false
-				hasPM=false
-				if(t0.endsWith('a.m.')){
-					t0=t0.replaceAll('a\\.m\\.','am')
-				}
-				if(t0.endsWith('p.m.')){
-					t0=t0.replaceAll('p\\.m\\.','pm')
-				}
-				if(t0.endsWith('am')){
-					hasMeridian=true
-					hasAM=true
-				}
-				if(t0.endsWith('pm')){
-					hasMeridian=true
-					hasPM=true
-				}
+				t0=(nsdate?.trim() ?: sBLK).toLowerCase()
+				if(t0.endsWith('a.m.')) t0=t0.replaceAll('a\\.m\\.','am')
+				if(t0.endsWith('p.m.')) t0=t0.replaceAll('p\\.m\\.','pm')
+				Boolean hasAM=t0.endsWith('am')
+				Boolean hasPM=t0.endsWith('pm')
+				Boolean hasMeridian=hasAM || hasPM
 				Long time
 				time=lnull
 				if(hasMeridian)t0=t0[iZ..-i3].trim()
 
 				try{
 					if(t0.length()==i8){
-						n=i9
-						String tt=t0
-						time=(new Date()).parse('HH:mm:ssXX',tt+'-0000').getTime()
+						time=(new Date()).parse('HH:mm:ssXX',t0+'-0000').getTime()
 						time=gtWCTimeToday(r9,time)
-					}else{
-						n=i10
-						time=wtimeToday(t0,tz).getTime()
-					}
+					}else time=wtimeToday(t0,tz).getTime()
 				}catch(ignored){}
 
 				if(hasMeridian && time){
-					n=i11
-					ZonedDateTime zdt,nzdt; zdt= localDate(r9,time)
+					ZonedDateTime zdt= localDate(r9,time)
 					Integer hr,nhr; hr=zdt.getHour()
 					nhr= hr
 					Boolean twelve= hr>=i12
 					if(twelve && hasAM)nhr-=i12
 					if(!twelve && hasPM)nhr+=i12
-					if(hr!=nhr){
-						nzdt= zdt.withHour(nhr)
-						time= nzdt.toInstant().toEpochMilli()
-					}
+					if(hr!=nhr) time= zdt.withHour(nhr).toInstant().toEpochMilli()
 				}
 				res=time ?: lZ
-			}catch(ignored){ res=lnull }
+			}catch(ignored){}
 		}
 	}
 
-	if(res==lnull){
-		if(dateOrTimeOrString instanceof Date){
-			n=i12
-			res=((Date)dateOrTimeOrString).getTime()
-		}
-	}
-	if(res==lnull){
-		n=i13
-		res=lZ
-	}
-	//if(eric1() && ((String)gtSetting(sLOGNG))?.toInteger()>i2)
-	//	log.warn "stringToTime n is $n"
-	//String sv= TZID(rTZ(r9))
-	//mTZ()
-	return res
+	if(res==lnull && dateOrTimeOrString instanceof Date) res=((Date)dateOrTimeOrString).getTime()
+	return res!=lnull ? res:lZ
 }
 
 @CompileStatic
@@ -13354,47 +13247,33 @@ private void error(message,Map r9,Integer shift=iN2,Exception err=null){
 }
 //error "object: ${describeObject(e)}",r9
 
+@CompileStatic
 private Map timer(String message,Map r9,Integer shift=iN2,err=null){
 	if(!isInf(r9)) return null
-	return log(message,r9,shift,err,sTIMER)
+	return log(message,r9,shift,(Exception)err,sTIMER)
 }
 
-//@Field static final String sCLR4D9	= '#2784D9'
 @Field static final String sCLRRED	= 'red'
-//@Field static final String sCLRRED2	= '#cc2d3b'
 @Field static final String sCLRGRY	= 'gray'
-//@Field static final String sCLRGRN	= 'green'
-//@Field static final String sCLRGRN2	= '#43d843'
 @Field static final String sCLRORG	= 'orange'
-@Field static final String sLINEBR	= '<br>'
 @Field static final String sSPANS	= '<span'
 @Field static final String sSTYLE	= 'style='
 @Field static final String sCLR		= 'color: '
-@Field static final String sFSZ		= 'font-size: '
-@Field static final String sFWT		= 'font-weight: bold;'
 @Field static final String sIMPT	= 'px !important;'
 @CompileStatic
-static String span(String str,String clr=sNL,String sz=sNL,Boolean bld=false,Boolean br=false){
-	return str ? sSPANS+" ${(clr || sz || bld) ? sSTYLE+"'${clr ? sCLR+"${clr};":sBLK}${sz ? sFSZ+"${sz};":sBLK}${bld ? sFWT:sBLK}'":sBLK}>${str}</span>${br ? sLINEBR:sBLK}": sBLK
+static String span(String str,String clr=sNL){
+	return str ? sSPANS+" ${clr ? sSTYLE+"'"+sCLR+"${clr};'":sBLK}>${str}</span>": sBLK
 }
 
 private static String sectionTitleStr(String title)	{ return '<h3>'+title+'</h3>' }
 private static String inputTitleStr(String title)	{ return '<u>'+title+'</u>' }
-//private static String pageTitleStr(String title)	{ return '<h1>'+title+'</h1>' }
-//private static String paraTitleStr(String title)	{ return '<b>'+title+'</b>' }
 
 @Field static final String sGITP='https://cdn.jsdelivr.net/gh/imnotbob/webCoRE@hubitat-patches/resources/icons/'
 private static String gimg(String imgSrc){ return sGITP+imgSrc }
 
 @CompileStatic
-private static String imgTitle(String imgSrc,String titleStr,String color=sNL,Integer imgWidth=30,Integer imgHeight=iZ){
-	String imgStyle; imgStyle=sBLK
-	String myImgSrc=gimg(imgSrc)
-	imgStyle+=imgWidth>iZ ? 'width: '+imgWidth.toString()+sIMPT:sBLK
-	imgStyle+=imgHeight>iZ ? imgWidth!=iZ ? sSPC:sBLK+'height:'+imgHeight.toString()+sIMPT:sBLK
-	String si="""<img style="${imgStyle}" src="${myImgSrc}"> ${titleStr}</img>""".toString()
-	if(color!=sNL) return """<div style="${sCLR}${color}; ${sFWT}">${si}</div>""".toString()
-	else return si
+private static String imgTitle(String imgSrc,String titleStr){
+	return """<img style="width: 30${sIMPT}" src="${gimg(imgSrc)}"> ${titleStr}</img>""".toString()
 }
 
 @CompileStatic
@@ -13432,7 +13311,7 @@ private void tracePoint(Map r9,String oId,Long duration,value){
 	'December'
 ]
 
-@Field static volatile Map<String,Map> svSunTFLD = [:]
+@Field static final ConcurrentHashMap<String,Map> svSunTFLD=new ConcurrentHashMap<String,Map>() // TZ id -> sun times; entries replaced, never mutated
 @Field static final String sNEXTM='nextM'
 @Field static final String sSUNT= 'sunTimes'
 
@@ -13449,7 +13328,7 @@ private Map initSunrSunst(Map r9){
 	if(t0!=null){
 		if(t<lMs(t0,sNEXTM)){
 			r9[ty]=[:]+t0
-		}else{ t0=null; svSunTFLD[k]=null; mb() }
+		}else{ svSunTFLD.remove(k,t0); t0=null } // only if no one stored a fresh entry meanwhile
 	}
 	if(t0==null){
 		Map sunTimes=app.getSunriseAndSunset([(sDATE):t])
@@ -13497,7 +13376,7 @@ private Map initSunrSunst(Map r9){
 		if(!good || !ok) warn 'Please update HE firmware to improve time handling',r9
 		r9[ty]=t0
 		if(ok&&good){
-			svSunTFLD[k]=t0; mb()
+			svSunTFLD[k]=[:]+t0 // own copy: r9's map may be changed by this run
 			if(eric())debug "updating global sunrise ${t0}",null
 		}
 	}
@@ -13512,86 +13391,38 @@ private Long getSunsetTime(Map r9,Long dayBasis=null){ commonSunTime(r9,sSUNSET,
 
 @CompileStatic
 private Long commonSunTime(Map r9,String tvar,Long dayBasis=null){
-//	Boolean lge=isDbg(r9) && isEric(r9)
-//	String myS; myS=sNL
-//	if(lge){
-//		myS='get'+tvar.capitalize()+'Time: '
-//		myDetail r9,myS+"${dayBasis} ${dayBasis ? formatLocalTime(r9,dayBasis): ""}",i1
-//	}
-	ZonedDateTime zdt,nzdt
-	Long res
-	if(dayBasis){
-		res= calcSunTime(r9,tvar,dayBasis)
-	}else{
-		Map st=initSunrSunst(r9); res= lMs(st,tvar)
-	}
-//	if(lge)
-//		myDetail r9,myS+"${res} ${res ? formatLocalTime(r9,res): ""}"
-	return res
+	return dayBasis ? calcSunTime(r9,tvar,dayBasis) : lMs(initSunrSunst(r9),tvar)
 }
 
 Long calcSunTime(Map r9,String typ,Long time){
 	Long res
-	String m; m=sNL
+	String m
 	Long now= wnow()
-	Long t; t= time ?: now
-	Boolean lge=isDbg(r9) && isEric(r9)
-	//if(lge)
-	//	myDetail r9,"calcSunTime: ${typ} time: $time now: $now nows: ${formatLocalTime(r9,now)} t: ${formatLocalTime(r9,t)}",iN2
-	ZonedDateTime zdt,nzdt
-	zdt= localDate(r9,t)
+	Long t= time ?: now
+	ZonedDateTime zdt= localDate(r9,t)
 	// strip the time to midnight of the day in question
-	nzdt= zdt.withNano(iZ)
-	nzdt= nzdt.withSecond(iZ)
-	nzdt= nzdt.withMinute(iZ)
-	nzdt= nzdt.withHour(iZ)
+	ZonedDateTime nzdt= zdt.withNano(iZ).withSecond(iZ).withMinute(iZ).withHour(iZ)
 	Boolean sunset= typ==sSUNSET
 
 	//if(piston location is same as hub location) then
-	ZonedDateTime nnzdt; nnzdt= localDate(r9,now)
-	if(zdt.getYear()==nnzdt.getYear() && zdt.getMonth().getValue()==nnzdt.getMonth().getValue() && zdt.getDayOfMonth()==nnzdt.getDayOfMonth()){
-		if(sunset)
-			res= getSunsetTime(r9)
-		else
-			res= getSunriseTime(r9)
+	if(zdt.toLocalDate()==localDate(r9,now).toLocalDate()){
+		res= sunset ? getSunsetTime(r9) : getSunriseTime(r9)
 		m= 'getSun'
+	}else if(zdt.toLocalDate()==localDate(r9,now+Math.round(dMSDAY)).toLocalDate()){ //+ 1 day
+		res= sunset ? getNextSunsetTime(r9) : getNextSunriseTime(r9)
+		m= 'getNextSun'
 	}else{
-		nnzdt= localDate(r9,now+Math.round(dMSDAY)) //+ 1 day
-		if(zdt.getYear()==nnzdt.getYear() && zdt.getMonth().getValue()==nnzdt.getMonth().getValue() && zdt.getDayOfMonth()==nnzdt.getDayOfMonth()){
-			if(sunset)
-				res = getNextSunsetTime(r9)
-			else
-				res = getNextSunriseTime(r9)
-			m = 'getNextSun'
-		}else{
-			try{
-				Date d= new Date(nzdt.toInstant().toEpochMilli())
-				Map sunTimes=app.getSunriseAndSunset([(sDATE):d]) // this only works for hub's location
-				if(sunset)
-					res=((Date)sunTimes[sSUNSET]).getTime()
-				else
-					res=((Date)sunTimes[sSUNRISE]).getTime()
-				m= 'calculated'
-			}catch(ignore){
-				t=nzdt.toInstant().toEpochMilli()
-				if(sunset)
-					res= Math.round(t+19.0D*dMSECHR)
-				else
-					res= Math.round(t+7.0D*dMSECHR)
-				m= 'guessed'
-			}
+		try{
+			Map sunTimes=app.getSunriseAndSunset([(sDATE):new Date(nzdt.toInstant().toEpochMilli())]) // this only works for hub's location
+			res=((Date)sunTimes[sunset ? sSUNSET:sSUNRISE]).getTime()
+			m= 'calculated'
+		}catch(ignore){
+			res= Math.round(nzdt.toInstant().toEpochMilli()+(sunset ? 19.0D:7.0D)*dMSECHR)
+			m= 'guessed'
 		}
 	}
-	// else piston location is set different than hub location
-/*				Calendar calendar= Calendar.getInstance(rTZ(r9))
-				calendar.setTimeInMillis(nzdt.toInstant().toEpochMilli())
-				SolarTime solarTime= SolarTime.ofLocation(gtLlat().toDouble(), gtLlong().toDouble()) // this is only hub location
-				if(typ==sSUNSET)
-					res= solarTime.sunset(calendar)
-				else
-					res= solarTime.sunrise(calendar)
-*/
-	if(lge)
+	// else piston location is set different than hub location (would need SolarTime with piston lat/long)
+	if(isDbg(r9) && isEric(r9))
 		myDetail r9,"calcSunTime: ${typ} ${m} result: $res ${formatLocalTime(r9,res)}",iN2
 	return res
 }
@@ -13686,12 +13517,6 @@ private Long getNextNoonTime(Map r9,Long time=null){
  */
 @CompileStatic
 private void getLocalVariables(Map r9,Map aS, Boolean frc=true, Boolean proxy=false, List<Map> vars=null){
-	/*String myS; myS=sBLK
-	Boolean lge=isEric(r9)
-	if(lge){
-		myS="getLocalVariables:"+sffwdng(r9)
-		myDetail r9,myS,i1
-	}*/
 	r9[sLOCALV]=[:]
 	String t
 	Map values=mMs(aS,sVARS)
@@ -13995,58 +13820,22 @@ private gtSysVarVal(Map r9,String name, Boolean frcStr=false){
 		case sPEVUNIT: return pe[sUNIT]
 
 		case '$random':
-			def tr=getRandomValue(r9,name)
-			Double r
-			if(tr!=null)r=(Double)tr
-			else{
-				r=Math.random()
-				setRandomValue(r9,name,r)
-			}
-			return r
 		case '$randomColor':
-			def tr=getRandomValue(r9,name)
-			String r
-			if(tr!=null)r=(String)tr
-			else{
-				r=sMs(getRandomColor(),'rgb')
-				setRandomValue(r9,name,r)
-			}
-			return r
 		case '$randomColorName':
-			def tr=getRandomValue(r9,name)
-			String r
-			if(tr!=null)r=(String)tr
-			else{
-				r=sMs(getRandomColor(),sNM)
-				setRandomValue(r9,name,r)
-			}
-			return r
 		case '$randomLevel':
-			def tr=getRandomValue(r9,name)
-			Integer r
-			if(tr!=null)r=(Integer)tr
-			else{
-				r=Math.round(d100*Math.random()).toInteger()
-				setRandomValue(r9,name,r)
-			}
-			return r
 		case '$randomSaturation':
-			def tr=getRandomValue(r9,name)
-			Integer r
-			if(tr!=null)r=(Integer)tr
-			else{
-				r=Math.round(i50+i50*Math.random()).toInteger()
-				setRandomValue(r9,name,r)
-			}
-			return r
 		case '$randomHue':
-			def tr=getRandomValue(r9,name)
-			Integer r
-			if(tr!=null)r=(Integer)tr
-			else{
-				r=Math.round(d360*Math.random()).toInteger()
-				setRandomValue(r9,name,r)
+			def r=getRandomValue(r9,name)
+			if(r!=null)return r
+			switch(name){
+				case '$random': r=Math.random(); break
+				case '$randomColor': r=sMs(getRandomColor(),'rgb'); break
+				case '$randomColorName': r=sMs(getRandomColor(),sNM); break
+				case '$randomLevel': r=Math.round(d100*Math.random()).toInteger(); break
+				case '$randomSaturation': r=Math.round(i50+i50*Math.random()).toInteger(); break
+				case '$randomHue': r=Math.round(d360*Math.random()).toInteger(); break
 			}
+			setRandomValue(r9,name,r)
 			return r
 		case '$temperatureScale':return gtLtScale()
 
@@ -14282,13 +14071,10 @@ private static String md5(String s){
 	return MessageDigest.getInstance(sMD5).digest(s.getBytes()).encodeHex().toString()
 }
 
-@Field volatile static Map<String,Map<String,String>> theHashMapVFLD=[:]
+@Field static final ConcurrentHashMap<String,Map<String,String>> theHashMapVFLD=new ConcurrentHashMap<String,Map<String,String>>()
 
 static void clearHashMap(String wName){
-	if(theHashMapVFLD==null) theHashMapVFLD=[:]
-	theHashMapVFLD[wName]=[:] as Map<String,String>
-	theHashMapVFLD=theHashMapVFLD
-	mb()
+	theHashMapVFLD[wName]=new ConcurrentHashMap<String,String>()
 }
 
 @CompileStatic
@@ -14314,12 +14100,15 @@ private static String hashId2(id,String wName){
 	String r
 	String tId=id.toString()
 	Map<String,String> a
-	a= theHashMapVFLD ? theHashMapVFLD[wName] : null
-	if(a==null){ clearHashMap(wName); a=[:] }
+	a= theHashMapVFLD[wName]
+	if(a==null){
+		theHashMapVFLD.putIfAbsent(wName,new ConcurrentHashMap<String,String>())
+		a=theHashMapVFLD[wName]
+	}
 	r=a[tId]
 	if(r==sNL){
 		r=sCLN+md5(sCR+tId)+sCLN
-		theHashMapVFLD[wName][tId]=r
+		a[tId]=r // if clearHashMap swapped the map meanwhile, this entry is just not cached
 	}
 	return r
 }
@@ -14382,6 +14171,8 @@ private Map<String,Map> VirtualCommandsF(){
 		push:[c:"push",	s:null,r:"pushMomentary"],
 		flash:[c:"flash",	s:null,r:"flashNative"] //flash native command conflicts with flash emulated command. Also needs "o" option on command described later
 ]
+/** reverse of CommandsOverrides (r -> c) for a direct lookup per task; keep in sync */
+@Field static final Map<String,String> CommandsOverridesR=[pushMomentary:"push", flashNative:"flash"]
 
 @Field static Map<String,Map> theVirtDevicesFLD
 //uses ac,o
@@ -14421,9 +14212,12 @@ private Map<String, DeviceWrapper> wlistAvailableDevices(Boolean raw){ return (M
 private Map wgetWData(){ return [:]+(Map)parent.getWData() }
 private Map wlistAvailableVariables(){ return (Map)parent.listAvailableVariables() }
 
-private String sPAppId(){ return ((Long)parent.id).toString() }
+/** per execution (non-static) caches: app.id / parent.id are dynamic lookups used many times per event */
+@Field String sPAppIdFLD
+@Field String sAppIdFLD
+private String sPAppId(){ if(sPAppIdFLD==null) sPAppIdFLD=((Long)parent.id).toString(); return sPAppIdFLD }
 
-private String sAppId(){ return ((Long)app.id).toString() }
+private String sAppId(){ if(sAppIdFLD==null) sAppIdFLD=((Long)app.id).toString(); return sAppIdFLD }
 
 private Map wgetGlobalVar(String vn){
 	def a= getGlobalVar(vn)
@@ -14431,29 +14225,44 @@ private Map wgetGlobalVar(String vn){
 	return null
 }
 
-@Field volatile static Map<String,Map<String,List>> globalVarsUseFLD=[:]
+// shared by all pistons of a parent: concurrent maps, and the piston lists are copy-on-write
+// (replaced atomically via putIfAbsent/replace, never mutated in place)
+@Field volatile static ConcurrentHashMap<String,ConcurrentHashMap<String,List>> globalVarsUseFLD=new ConcurrentHashMap<String,ConcurrentHashMap<String,List>>()
+
+private ConcurrentHashMap<String,List> gtGlobalVarsUseMap(String wName){
+	ConcurrentHashMap<String,List> vars
+	vars=globalVarsUseFLD[wName]
+	if(vars==null){
+		globalVarsUseFLD.putIfAbsent(wName,new ConcurrentHashMap<String,List>())
+		vars=globalVarsUseFLD[wName]
+	}
+	return vars
+}
 
 private void waddInUseGlobalVar(Map r9,String vn,Boolean heglobal=true,Boolean exists=true){
 	String wName=sMs(r9,spId)
-	Map<String,List> vars=globalVarsUseFLD[wName] ?: [:]
+	ConcurrentHashMap<String,List> vars=gtGlobalVarsUseMap(wName)
 	String nvn= heglobal ? sAT2+vn : vn
-	List<String> pstns
-	pstns= vars[nvn] ?: []
 	String sa= sAppId()
-	if(!(sa in pstns)){
-		pstns << sa
-		vars[nvn]= pstns
-		globalVarsUseFLD[wName]= vars
-		globalVarsUseFLD= globalVarsUseFLD
-		if(isEric(r9))myDetail r9,"added in use $nvn $wName $sa $pstns $vars",iN2
+	List<String> pstns,npstns
+	while(true){
+		pstns= (List<String>)vars[nvn]
+		if(pstns!=null && sa in pstns)break
+		npstns= pstns!=null ? ([]+pstns) : []
+		npstns << sa
+		Boolean ok= pstns==null ? vars.putIfAbsent(nvn,npstns)==null : vars.replace(nvn,pstns,npstns)
+		if(ok){
+			if(isEric(r9))myDetail r9,"added in use $nvn $wName $sa $npstns $vars",iN2
+			break
+		}
 	}
 	if(heglobal && exists) addInUseGlobalVar(vn)
 }
 
 Map<String,List> gtGlobalVarsInUse(){
 	String wName= sPAppId()
-	Map<String,List> vars=globalVarsUseFLD[wName] ?: [:]
-	return vars
+	Map<String,List> vars=globalVarsUseFLD[wName]
+	return vars!=null ? [:]+vars : [:]
 }
 
 private Boolean wsetGlobalVar(String vn,vl){ setGlobalVar(vn,vl) }
@@ -14461,18 +14270,14 @@ private Boolean wsetGlobalVar(String vn,vl){ setGlobalVar(vn,vl) }
 private void wremoveAllInUseGlobalVar(){
 	String wName= sPAppId()
 	String sa= sAppId()
-	Map<String,List> vars=globalVarsUseFLD[wName] ?: [:]
-	vars.each{ Map.Entry<String,List>it ->
-		String k= it.key
-		List<String> pstns
-		pstns= it.value //tvars[vn] ?: []
-		if(k && sa in pstns){
-			pstns= pstns-[sa] as List<String>
-			vars[k]= pstns
+	ConcurrentHashMap<String,List> vars=gtGlobalVarsUseMap(wName)
+	for(String k in vars.keySet()){ // weakly consistent iteration; no ConcurrentModificationException
+		while(true){
+			List<String> pstns= (List<String>)vars[k]
+			if(!k || pstns==null || !(sa in pstns))break
+			if(vars.replace(k,pstns,(pstns-[sa]) as List<String>))break
 		}
 	}
-	globalVarsUseFLD[wName]= vars
-	globalVarsUseFLD= globalVarsUseFLD
 
 	removeAllInUseGlobalVar()
 }
@@ -14564,7 +14369,18 @@ private Boolean isDeviceLocation(d){
 	return false
 }
 
-Boolean wdeviceHascommand(DeviceWrapper device, String cmd){ return (Boolean)device?.hasCommand(cmd) }
+/** device id:command -> hasCommand; hasCommand scans the driver's command list. Cleared by clearParentCache */
+@Field static final ConcurrentHashMap<String,Boolean> devHasCmdFLD=new ConcurrentHashMap<String,Boolean>()
+Boolean wdeviceHascommand(DeviceWrapper device, String cmd){
+	if(device==null)return false
+	String k=device.getId().toString()+sCLN+cmd
+	Boolean r=devHasCmdFLD[k]
+	if(r==null){
+		r=!!device.hasCommand(cmd)
+		devHasCmdFLD[k]=r
+	}
+	return r
+}
 
 private static String dvStr(d){ return d.id.toString() }
 private static String hashD(Map r9,d){ return hashId2(d.id,sMs(r9,spId)) }

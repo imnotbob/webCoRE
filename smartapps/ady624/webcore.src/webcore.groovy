@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update August 8, 2026 for Hubitat
+ * Last update October 13, 2026 for Hubitat
  */
 
 /*
@@ -181,7 +181,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - August 8, 2026'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - October 13, 2026'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
