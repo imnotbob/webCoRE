@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not see <http://www.gnu.org/licenses/>.
  *
- * Last update October 13, 2026 for Hubitat
+ * Last update October 14, 2026 for Hubitat
  */
 
 //file:noinspection GroovySillyAssignment
@@ -1741,11 +1741,13 @@ private void checkLabel(Map r9=null){
 		doLog(sERROR,"null label")
 		return
 	}
-	if(act && !dis)wappUpdateLabel(savedLabel)
+	String lbl
+	if(act && !dis) lbl=savedLabel
 	else{
 		String tstr= dis ? (act ? '(Disabled) Kill switch is active' : '(Paused) Kill switch is active') : '(Paused)'
-		wappUpdateLabel(savedLabel+sSPC+span(tstr,sCLRORG))
+		lbl=savedLabel+sSPC+span(tstr,sCLRORG)
 	}
+	if(gtAppN()!=lbl) wappUpdateLabel(lbl) // platform update only when the label actually changes
 }
 
 // main api call points
@@ -2500,7 +2502,7 @@ private LinkedHashMap getDSCache(String meth,Boolean Upd=true,Boolean light=fals
 
 		loadTZs(t1,sMs(aS,sTZ))
 
-		t1[sMEM]=mem()
+		t1[sMEM]=mem(true,lMEMW) // reuse a recent measurement instead of serializing all of state
 		resetRandomValues(t1)
 		def devs=gtSetting(sDV)
 		t1[sDEVS]=devs && devs instanceof List ? ((List)devs).collectEntries{ Object it -> [(hashD(t1,it)):it]}:[:]
@@ -2951,7 +2953,7 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 
 	// take the lease before building the runtime data: a run finishing in between would otherwise leave
 	// this run with its pre-save cache, store, temp and nextSchedule
-	Map pc=getCachedFields(sHNDLEVT,[sPEP])
+	Map pc=getCachedFields(sHNDLEVT,[sPEP,sLOGNG])
 	Boolean myPep= pc!=null ? bIs(pc,sPEP) : bIs(gtState(),sPEP)
 	Boolean serializationOn=!myPep // && true // on / off switch
 	Boolean doSerialization=serializationOn && !callMySelf
@@ -2960,6 +2962,12 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 	retSt=[(sSEMA):lZ,(sSEMAN):sNL,(sSEMADEL):lZ] as LinkedHashMap
 	if(doSerialization) retSt=lockOrQueueSemaphore(event,queue)
 	Long lEnd=wnow()
+
+	// queued with no queue overflow and logging off: nothing to log or report, so skip building runtime data
+	if(doSerialization && bIs(retSt,sEXITOUT) && !iMs(retSt,sQOVR) && pc!=null && pc[sLOGNG]!=null && iMs(pc,sLOGNG)==iZ){
+		event=null
+		return
+	}
 
 	tmpRtD= getTemporaryRunTimeData(startTime)
 	tmpRtD[sLSTART]=lStart
@@ -3051,249 +3059,258 @@ void handleEvents(evt,Boolean queue=true,Boolean callMySelf=false){
 			else nrtD= shortRtd(tmpRtD) // getRunTimeData(tmpRtD,null,false,true,true))
 		}
 		relaypCall(nrtD)
-		tmpRtD= getTemporaryRunTimeData(startTime)
+		tmpRtD=null // control event: nothing executes below, so no need to rebuild runtime data
 	}
 
 
 
-//measure how Long first state access takes
-	Long stAccess; stAccess=lZ
-	if(lg>iZ && !myPep){
-		if(tmpRtD[sSTACCESS]==null){
-			Long stStart,b
-			stStart=wnow()
-			Map mst=gtState()
-			b=lMs(mst,sNSCH) // forcing state accesses
-			//List a=liMs(mst,sSCHS)
-			//Map pEvt=mMs(mst,sLEVT)
-			stAccess=elapseT(stStart)
-		}else stAccess=lMs(tmpRtD,sSTACCESS)
-	}
-
-	tmpRtD[sPCACHE]=[:]
-	LinkedHashMap r9
-	r9= getRunTimeData(tmpRtD,retSt,false,true,true,false) // local variables are loaded by executeEvent
-	tmpRtD=null
-	retSt=null
-	checkVersion(r9)
-
-	Long theend=wnow()
-	Long t0=elapseT(startTime,theend)
-	Long le=lMs(r9,sLSEND)
-	Long t1=elapseT(lMs(r9,sLSTART),le)
-	Long t2=lMs(r9,sGENIN)
-	Long t3=elapseT(lMs(r9,sPSTART),lMs(r9,sPEND))
-	r9[sCURS]=[(sI):t0.toInteger(),(sL):t1.toInteger(),(sR):t2.toInteger(),(sP):t3.toInteger(),(sS):stAccess.toInteger()] as LinkedHashMap
-	if(lg>i1){
-		Long missing=t0-t1-t2-stAccess
-		Long t4=elapseT(startTime,le)
-		Long t5=elapseT(le,theend)
-		String Msg= "Runtime (${r9.size()} keys) initialized ".toString()
-		String adMsg= lg>i2 || eric() ? "${t0} LockT > ${t1}ms > r9T > ${t2}ms > pistonT > ${t3}ms (first state access ${stAccess} m:${missing} $t4 $t5)".toString() : sBLK
-		if(lg>i2)debug Msg+adMsg+" (${sHVER})".toString(),r9
-		else trace Msg+"in ${t1+t2+t3}ms (${sHVER}) ".toString()+adMsg,r9
-	}
-	for(String foo in cleanData1) r9.remove(foo)
-
-	resetRandomValues(r9)
-	r9[sTPAUSE]=lZ
-	((Map)r9[sSTATS])[sTIMING]=[(sT):startTime,(sD):eventDelay>lZ ? eventDelay:lZ,(sL):elapseT(startTime)] as LinkedHashMap
-
-	Boolean success,firstTime; success=true; firstTime=false
-	Long eStrt=wnow()
-
-	if( !(end||clrC||clrL||clrA||pause||resume) ){ // if not an event we already handled...
-		//debug
-		Long tl=lMs(r9,sNSCH)
-		String lsts='lastSchedule'
-		if(lMs(r9,lsts)!=tl){
-			r9[lsts]=tl
-			updateCacheFld(r9,lsts,tl,sT+s1,true)
+	String mSmaNm
+	Long lS
+	if(end||clrC||clrL||clrA||pause||resume){
+		// control or inactive event: nothing executes, so skip building the full runtime data (and re-parsing the piston)
+		mSmaNm=sMs(retSt,sSEMAN)
+		lS=lMs(retSt,sSEMA)
+		tmpRtD=null
+		retSt=null
+	}else{
+	//measure how Long first state access takes
+		Long stAccess; stAccess=lZ
+		if(lg>iZ && !myPep){
+			if(tmpRtD[sSTACCESS]==null){
+				Long stStart,b
+				stStart=wnow()
+				Map mst=gtState()
+				b=lMs(mst,sNSCH) // forcing state accesses
+				//List a=liMs(mst,sSCHS)
+				//Map pEvt=mMs(mst,sLEVT)
+				stAccess=elapseT(stStart)
+			}else stAccess=lMs(tmpRtD,sSTACCESS)
 		}
 
-		Map msg2; msg2=null
-		firstTime=true
-		if( (evntName==sTIME && bIs(event,sRECOVERY)) || !(evntName in ListTIMEASYNC)){
-			if(lg>i1){
-				msg2=timer sEXC,r9,iN1
-				trace sEXS,r9,i1
+		tmpRtD[sPCACHE]=[:]
+		LinkedHashMap r9
+		r9= getRunTimeData(tmpRtD,retSt,false,true,true,false) // local variables are loaded by executeEvent
+		tmpRtD=null
+		retSt=null
+		checkVersion(r9)
+
+		Long theend=wnow()
+		Long t0=elapseT(startTime,theend)
+		Long le=lMs(r9,sLSEND)
+		Long t1=elapseT(lMs(r9,sLSTART),le)
+		Long t2=lMs(r9,sGENIN)
+		Long t3=elapseT(lMs(r9,sPSTART),lMs(r9,sPEND))
+		r9[sCURS]=[(sI):t0.toInteger(),(sL):t1.toInteger(),(sR):t2.toInteger(),(sP):t3.toInteger(),(sS):stAccess.toInteger()] as LinkedHashMap
+		if(lg>i1){
+			Long missing=t0-t1-t2-stAccess
+			Long t4=elapseT(startTime,le)
+			Long t5=elapseT(le,theend)
+			String Msg= "Runtime (${r9.size()} keys) initialized ".toString()
+			String adMsg= lg>i2 || eric() ? "${t0} LockT > ${t1}ms > r9T > ${t2}ms > pistonT > ${t3}ms (first state access ${stAccess} m:${missing} $t4 $t5)".toString() : sBLK
+			if(lg>i2)debug Msg+adMsg+" (${sHVER})".toString(),r9
+			else trace Msg+"in ${t1+t2+t3}ms (${sHVER}) ".toString()+adMsg,r9
+		}
+		for(String foo in cleanData1) r9.remove(foo)
+
+		resetRandomValues(r9)
+		r9[sTPAUSE]=lZ
+		r9[sPNDVARS]=[:] as LinkedHashMap // local variable writes are batched and persisted in finalizeEvent
+		((Map)r9[sSTATS])[sTIMING]=[(sT):startTime,(sD):eventDelay>lZ ? eventDelay:lZ,(sL):elapseT(startTime)] as LinkedHashMap
+
+		Boolean success,firstTime; success=true; firstTime=false
+		Long eStrt=wnow()
+
+		if( !(end||clrC||clrL||clrA||pause||resume) ){ // if not an event we already handled...
+			//debug
+			Long tl=lMs(r9,sNSCH)
+			String lsts='lastSchedule'
+			if(lMs(r9,lsts)!=tl){
+				r9[lsts]=tl
+				updateCacheFld(r9,lsts,tl,sT+s1,true)
 			}
-			success=executeEvent(r9,event)
-			if(lg>i1)trace msg2,r9
-			firstTime=false
-		}
 
-		if(evntName==sTIME){
-			// recovery: the hub job may be gone; clear it and sNSCH so processSchedules re-arms it
-			if(bIs(event,sRECOVERY) && lMs(r9,sNSCH)!=lZ) wunschedule(sTIMHNDR)
-			chgNextSch(r9,lZ)
-		}
+			Map msg2; msg2=null
+			firstTime=true
+			if( (evntName==sTIME && bIs(event,sRECOVERY)) || !(evntName in ListTIMEASYNC)){
+				if(lg>i1){
+					msg2=timer sEXC,r9,iN1
+					trace sEXS,r9,i1
+				}
+				success=executeEvent(r9,event)
+				if(lg>i1)trace msg2,r9
+				firstTime=false
+			}
 
-		List<Map> schedules
-		String mSmaNm=sMs(r9,snId)
-		Map sch
-		Long sVariance=lMs(gtPLimits(),sSCHVARIANCE)
-		Long eT=lMs(gtPLimits(),sEXCTIME)
-		Long schdR=lMs(gtPLimits(),sSCHREM)
-		r9[sDID3OR5]=false
-		while(success && !bIs(r9,sDID3OR5) && eT+lMs(r9,sTMSTMP)-wnow()>schdR){
-			Boolean syncTime; syncTime=true
-			// if no queued events
-			if(!firstTime && serializationOn){
-				getTheLock(mSmaNm,sHNDLEVT)
-				Boolean inq=!!theQueuesVFLD[mSmaNm]
-				releaseTheLock(mSmaNm)
-				if(inq){
-					if(isEric(r9))warn "found pending queued events",null
+			if(evntName==sTIME){
+				// recovery: the hub job may be gone; clear it and sNSCH so processSchedules re-arms it
+				if(bIs(event,sRECOVERY) && lMs(r9,sNSCH)!=lZ) wunschedule(sTIMHNDR)
+				chgNextSch(r9,lZ)
+			}
+
+			List<Map> schedules
+			String qNm=sMs(r9,snId)
+			Map sch
+			Long sVariance=lMs(gtPLimits(),sSCHVARIANCE)
+			Long eT=lMs(gtPLimits(),sEXCTIME)
+			Long schdR=lMs(gtPLimits(),sSCHREM)
+			r9[sDID3OR5]=false
+			while(success && !bIs(r9,sDID3OR5) && eT+lMs(r9,sTMSTMP)-wnow()>schdR){
+				Boolean syncTime; syncTime=true
+				// if no queued events
+				if(!firstTime && serializationOn){
+					getTheLock(qNm,sHNDLEVT)
+					Boolean inq=!!theQueuesVFLD[qNm]
+					releaseTheLock(qNm)
+					if(inq){
+						if(isEric(r9))warn "found pending queued events",null
+						break
+					}
+				}
+
+				schedules=sgetSchedules(sHNDLEVT,myPep)
+				if(!schedules)break
+				Long t=wnow()
+
+				if(evntName==sASYNCREP){
+					String r=sR
+					event[sSCH]=schedules.find{ Map it -> sMs(it,r)==evntVal }
+				}else{
+					// find the next timer to be run
+					//anything less than scheduleVariance (63ms) in the future is considered due; will do some pause to sync with it
+					Long tv=t+sVariance
+					Map _schMin=schedules.min{ Map it -> lMt(it) }
+					sch=(_schMin!=null && lMt(_schMin)<tv) ? _schMin : null
+
+					evntName=sTIME
+					evntVal=t.toString()
+					event=[(sT):lMt(event),(sDEV):cvtLoc(),(sNM):evntName,(sVAL):t,(sSCH):sch]
+				}
+
+				if(event[sSCH]==null){ // if no timer found, exit
+					if(firstTime && eric())
+						warn "time event without schedule "+evntVal,r9
 					break
 				}
-			}
-
-			schedules=sgetSchedules(sHNDLEVT,myPep)
-			if(!schedules)break
-			Long t=wnow()
-
-			if(evntName==sASYNCREP){
-				String r=sR
-				event[sSCH]=schedules.find{ Map it -> sMs(it,r)==evntVal }
-			}else{
-				// find the next timer to be run
-				//anything less than scheduleVariance (63ms) in the future is considered due; will do some pause to sync with it
-				Long tv=t+sVariance
-				Map _schMin=schedules.min{ Map it -> lMt(it) }
-				sch=(_schMin!=null && lMt(_schMin)<tv) ? _schMin : null
-
-				evntName=sTIME
-				evntVal=t.toString()
-				event=[(sT):lMt(event),(sDEV):cvtLoc(),(sNM):evntName,(sVAL):t,(sSCH):sch]
-			}
-
-			if(event[sSCH]==null){ // if no timer found, exit
-				if(firstTime && eric())
-					warn "time event without schedule "+evntVal,r9
-				break
-			}
-			if(lMs(r9,sNSCH)!=lZ){
-				chgNextSch(r9,lZ)
-				wunschedule(sTIMHNDR)
-			}
-
-			sch=mMs(event,sSCH)
-			// serialized: this execution holds the lease and nothing above changed the saved schedules, so reuse
-			// the list read at the top of this pass (a private copy); parallel pistons re-read to narrow races
-			if(!serializationOn) schedules=sgetSchedules(sHNDLEVT+s1,myPep)
-			schedules.remove(sch)
-			updateSchCache(r9,schedules,sHNDLEVT+s1,sX,myPep)
-
-			if(!firstTime){
-				if(lg!=iZ) info 'Processing timer '+evntName+' = '+lMt(sch).toString(),r9
-
-				r9[sPCACHE]=[:]
-				Map<String,Map>sysV=msMs(r9,sSYSVARS)
-				for(String k in [sDLLRINDX,sDLLRDEVICE,sDLLRDEVS,sHTTPCNTN,sHTTPCODE,sHTTPOK,sIFTTTCODE,sIFTTTOK]) sysV[k][sV]=null
-				r9[sSYSVARS]=sysV
-
-				event[sT]=lMt(sch)
-			}
-
-			if(isEric(r9)) myDetail r9,"async/timer event $event",iN2
-
-			if(evntName==sASYNCREP){
-				syncTime=false
-				Integer rCode=iMs(event,sRESPCODE)
-				Boolean sOk=rCode>=i200 && rCode<i300
-				Map m=mMs(event,sSRTDATA)
-				String erMsg = m && sMs(m,sHTTPERR) ? sMs(m,sHTTPERR) : sBLK
-				if(erMsg){
-					error erMsg,r9
-					m.remove(sHTTPERR)
+				if(lMs(r9,sNSCH)!=lZ){
+					chgNextSch(r9,lZ)
+					wunschedule(sTIMHNDR)
 				}
-				switch(evntVal){
-					case sHTTPR:
-						Map ee; ee=mMs(sch,sSTACK)
-						ee=ee!=null ? ee:[:]
-						ee[sRESP]=event[sRESPDATA]
-						ee[sJSON]=event[sJSOND]
-						((Map)event[sSCH])[sSTACK]=ee
-						stSysVarVal(r9,sHTTPCNTN,sMs(event,sCONTENTT))
-					case sSTOREM:
-						if(m) for(item in m) r9[(String)item.key]=item.value
-					case sLIFX:
-					case sSENDE:
-						stSysVarVal(r9,sHTTPCODE,rCode)
-						stSysVarVal(r9,sHTTPOK,sOk)
-						break
-					case sIFTTM:
-						stSysVarVal(r9,sIFTTTCODE,rCode)
-						stSysVarVal(r9,sIFTTTOK,sOk)
-						break
-					default:
-						error "unknown async event "+evntVal,r9
+
+				sch=mMs(event,sSCH)
+				// serialized: this execution holds the lease and nothing above changed the saved schedules, so reuse
+				// the list read at the top of this pass (a private copy); parallel pistons re-read to narrow races
+				if(!serializationOn) schedules=sgetSchedules(sHNDLEVT+s1,myPep)
+				schedules.remove(sch)
+				updateSchCache(r9,schedules,sHNDLEVT+s1,sX,myPep)
+
+				if(!firstTime){
+					if(lg!=iZ) info 'Processing timer '+evntName+' = '+lMt(sch).toString(),r9
+
+					r9[sPCACHE]=[:]
+					for(String k in [sDLLRINDX,sDLLRDEVICE,sDLLRDEVS,sHTTPCNTN,sHTTPCODE,sHTTPOK,sIFTTTCODE,sIFTTTOK]) setSysV(r9,k,null)
+
+					event[sT]=lMt(sch)
 				}
-				evntName=sTIME
-				event[sNM]= evntName
-				event[sVAL]= t
-				evntVal=t.toString()
-			}else{
-				String ttyp=sMs(sch,sR)
-				if(ttyp in HttpAsync){
-					error "Timeout Error "+ttyp,r9
+
+				if(isEric(r9)) myDetail r9,"async/timer event $event",iN2
+
+				if(evntName==sASYNCREP){
 					syncTime=false
-					Integer rCode=408
-					Boolean sOk=false
-					switch(ttyp){
+					Integer rCode=iMs(event,sRESPCODE)
+					Boolean sOk=rCode>=i200 && rCode<i300
+					Map m=mMs(event,sSRTDATA)
+					String erMsg = m && sMs(m,sHTTPERR) ? sMs(m,sHTTPERR) : sBLK
+					if(erMsg){
+						error erMsg,r9
+						m.remove(sHTTPERR)
+					}
+					switch(evntVal){
 						case sHTTPR:
-							stSysVarVal(r9,sHTTPCNTN,sBLK)
-							if(sch[sSTACK]!=null)((Map)((Map)event[sSCH])[sSTACK])[sRESP]=null
+							Map ee; ee=mMs(sch,sSTACK)
+							ee=ee!=null ? ee:[:]
+							ee[sRESP]=event[sRESPDATA]
+							ee[sJSON]=event[sJSOND]
+							((Map)event[sSCH])[sSTACK]=ee
+							stSysVarVal(r9,sHTTPCNTN,sMs(event,sCONTENTT))
 						case sSTOREM:
-							stSysVarVal(r9,sHTTPCODE,rCode)
-							stSysVarVal(r9,sHTTPOK,sOk)
-							break
+							if(m) for(item in m) r9[(String)item.key]=item.value
 						case sLIFX:
 						case sSENDE:
+							stSysVarVal(r9,sHTTPCODE,rCode)
+							stSysVarVal(r9,sHTTPOK,sOk)
 							break
 						case sIFTTM:
 							stSysVarVal(r9,sIFTTTCODE,rCode)
 							stSysVarVal(r9,sIFTTTOK,sOk)
 							break
+						default:
+							error "unknown async event "+evntVal,r9
+					}
+					evntName=sTIME
+					event[sNM]= evntName
+					event[sVAL]= t
+					evntVal=t.toString()
+				}else{
+					String ttyp=sMs(sch,sR)
+					if(ttyp in HttpAsync){
+						error "Timeout Error "+ttyp,r9
+						syncTime=false
+						Integer rCode=408
+						Boolean sOk=false
+						switch(ttyp){
+							case sHTTPR:
+								stSysVarVal(r9,sHTTPCNTN,sBLK)
+								if(sch[sSTACK]!=null)((Map)((Map)event[sSCH])[sSTACK])[sRESP]=null
+							case sSTOREM:
+								stSysVarVal(r9,sHTTPCODE,rCode)
+								stSysVarVal(r9,sHTTPOK,sOk)
+								break
+							case sLIFX:
+							case sSENDE:
+								break
+							case sIFTTM:
+								stSysVarVal(r9,sIFTTTCODE,rCode)
+								stSysVarVal(r9,sIFTTTOK,sOk)
+								break
+						}
 					}
 				}
-			}
 
-			if(syncTime){
-				Long delay; delay=Math.round(lMt(sch)-d1*wnow())
-				if(delay>lZ){
-					delay=delay<sVariance ? delay:sVariance
-					doPause("Synchronizing scheduled event, waiting for ${delay}ms".toString(),delay,r9,true)
+				if(syncTime){
+					Long delay; delay=Math.round(lMt(sch)-d1*wnow())
+					if(delay>lZ){
+						delay=delay<sVariance ? delay:sVariance
+						doPause("Synchronizing scheduled event, waiting for ${delay}ms".toString(),delay,r9,true)
+					}
 				}
+				if(lg>i1){
+					msg2=timer sEXC,r9,iN1
+					trace sEXS,r9,i1
+				}
+				success=executeEvent(r9,event)
+				if(lg>i1)trace msg2,r9
+				firstTime=false
 			}
-			if(lg>i1){
-				msg2=timer sEXC,r9,iN1
-				trace sEXS,r9,i1
+
+			((Map)((Map)r9[sSTATS])[sTIMING])[sE]=elapseT(eStrt)
+			if(!success)msg[sM]=sEPF
+			if(eric()&& lg>i1){
+				String s; s=sMs(msg,sM)
+				s+=' Total pauses ms: '+lMs(r9,sTPAUSE).toString()
+				if(firstTime)s+=' found nothing to do'
+				msg[sM]=s
 			}
-			success=executeEvent(r9,event)
-			if(lg>i1)trace msg2,r9
-			firstTime=false
+			finalizeEvent(r9,msg,success)
+
+			if(bIs(r9,sLOGPE)) sendLEvt(r9)
 		}
 
-		((Map)((Map)r9[sSTATS])[sTIMING])[sE]=elapseT(eStrt)
-		if(!success)msg[sM]=sEPF
-		if(eric()&& lg>i1){
-			String s; s=sMs(msg,sM)
-			s+=' Total pauses ms: '+lMs(r9,sTPAUSE).toString()
-			if(firstTime)s+=' found nothing to do'
-			msg[sM]=s
-		}
-		finalizeEvent(r9,msg,success)
-
-		if(bIs(r9,sLOGPE)) sendLEvt(r9)
+		mSmaNm=sMs(r9,sSEMAN)
+		lS=lMs(r9,sSEMA)
+		r9=null
 	}
 
-	String mSmaNm=sMs(r9,sSEMAN)
-	Long lS; lS=lMs(r9,sSEMA)
-
 	event=null
-	r9=null
 
 // any queued events?
 	String msgt; msgt=sNL
@@ -3430,11 +3447,9 @@ private Boolean executeEvent(Map r9,Map event){
 			targs=es[sARGS]!=null && es[sARGS] instanceof Map ? mMs(es,sARGS):targs
 			Map tMap=mMs(es,sSTACK)
 			if(tMap!=null){
-				Map<String,Map>sysV=msMs(r9,sSYSVARS)
-				sysV[sDLLRINDX][sV]=tMap[sINDX] ?:null
-				sysV[sDLLRDEVICE][sV]=tMap[sDEV] ?:null
-				sysV[sDLLRDEVS][sV]=tMap[sDEVS] ?:[]
-				r9[sSYSVARS]=sysV
+				setSysV(r9,sDLLRINDX,tMap[sINDX] ?:null)
+				setSysV(r9,sDLLRDEVICE,tMap[sDEV] ?:null)
+				setSysV(r9,sDLLRDEVS,tMap[sDEVS] ?:[])
 				r9[sJSON]=tMap[sJSON] ?: [:]
 				r9[sRESP]=tMap[sRESP] ?: [:]
 				index=(Integer)srcEvent?.index ?: iZ
@@ -3605,7 +3620,14 @@ private Boolean executeEvent(Map r9,Map event){
 		needUpdateFLD=needUpdateFLD
 	}
 	else if(!bIs(r9,sDID3OR5)) tracePoint(r9,sBREAK,lZ,iZ)
-	processSchedules r9
+	String lId=sMs(r9,snId)
+	Boolean held=lockWarm(lId,sPROCS)
+	try{
+		flushVariables(r9) // one write per event; the next event in this run reloads variables from the cache
+		processSchedules r9
+	}finally{
+		if(held)releaseTheLock(lId)
+	}
 	if(lge)myDetail r9,myS+" result:${res}"
 	return res
 }
@@ -3620,39 +3642,49 @@ private void finalizeEvent(Map r9,Map iMsg,Boolean success=true){
 	// only tested for null to guard the two cache-update blocks below
 	Map cacheExists=getCachedFields(sFINLZ,lEMPTYS)
 
-	processSchedules(r9,true)
+	// one stripe lock for the cache updates below; the get/release calls inside only count re-entrantly
+	Boolean held=cacheExists!=null && lockWarm(myId,sFINLZ)
+	try{
+		// persist any remaining batched local variable changes (see updateVariable)
+		flushVariables(r9)
+		r9.remove(sPNDVARS)
 
-	if(success){
-		if(isInf(r9))info iMsg,r9
-	}else error iMsg,r9
+		processSchedules(r9,true)
 
-	updateLogs(r9,lMs(r9,sTMSTMP))
+		if(success){
+			if(isInf(r9))info iMsg,r9
+		}else error iMsg,r9
 
-	if(!bIs(r9,sDID3OR5))
-		((Map)r9[sTRC])[sD]=elapseT(lMt(mMs(r9,sTRC)))
+		updateLogs(r9,lMs(r9,sTMSTMP))
 
-	//save / update changed cache values
-	for(Map.Entry<String,Map> item in msMs(r9,sNWCACHE)) ((Map)r9[sCACHE])[item.key]=item.value
+		if(!bIs(r9,sDID3OR5))
+			((Map)r9[sTRC])[sD]=elapseT(lMt(mMs(r9,sTRC)))
 
-	//overwrite state might have changed meanwhile
-	if(cacheExists!=null){
-		getTheLock(myId,sFINLZ)
-		Map nc=theCacheVFLD[myId]
-		if(nc){
-			nc[sLSTPCQ]=r9[sLSTPCQ]
-			nc[sLSTPCSNT]=r9[sLSTPCSNT]
-			if(nc[sLSTPCQ]==null) nc.remove(sLSTPCQ)
-			if(nc[sLSTPCSNT]==null) nc.remove(sLSTPCSNT)
-			// store across runs. r9 got its own copies of these (cpyInner / getRunTimeData) and drops them
-			// below (cleanData), so they are handed over without copying again. sST stays in r9, so copy it.
-			nc[sCACHE]=mMs(r9,sCACHE)
-			nc[sSTORE]=mMs(r9,sSTORE)
-			nc[sST]=[:]+mMs(r9,sST)
-			if(!bIs(r9,sDID3OR5))
-				nc[sTRC]=mMs(r9,sTRC)
-			theCacheVFLD[myId]=nc
+		//save / update changed cache values
+		for(Map.Entry<String,Map> item in msMs(r9,sNWCACHE)) ((Map)r9[sCACHE])[item.key]=item.value
+
+		//overwrite state might have changed meanwhile
+		if(cacheExists!=null){
+			getTheLock(myId,sFINLZ)
+			Map nc=theCacheVFLD[myId]
+			if(nc){
+				nc[sLSTPCQ]=r9[sLSTPCQ]
+				nc[sLSTPCSNT]=r9[sLSTPCSNT]
+				if(nc[sLSTPCQ]==null) nc.remove(sLSTPCQ)
+				if(nc[sLSTPCSNT]==null) nc.remove(sLSTPCSNT)
+				// store across runs. r9 got its own copies of these (cpyInner / getRunTimeData) and drops them
+				// below (cleanData), so they are handed over without copying again. sST stays in r9, so copy it.
+				nc[sCACHE]=mMs(r9,sCACHE)
+				nc[sSTORE]=mMs(r9,sSTORE)
+				nc[sST]=[:]+mMs(r9,sST)
+				if(!bIs(r9,sDID3OR5))
+					nc[sTRC]=mMs(r9,sTRC)
+				theCacheVFLD[myId]=nc
+			}
+			releaseTheLock(myId)
 		}
-		releaseTheLock(myId)
+	}finally{
+		if(held)releaseTheLock(myId) // released before any parent call (relaypCall below)
 	}
 	if(myPep){
 		assignAS(sCACHE,mMs(r9,sCACHE))
@@ -3763,6 +3795,21 @@ private void updateSchCache(Map r9,List<Map> schedules,String t,String lt,Boolea
 	updateCacheFld(r9,sSCHS,(List<Map>)[]+schedules,t+lt,true)
 }
 
+/** true if both lists hold equal schedules (any order) */
+@CompileStatic
+private static Boolean sameSchs(List<Map> a,List<Map> b){
+	if(a.size()!=b.size())return false
+	List<Map> rest=[]+b
+	for(Map sch in a){
+		Integer ix; ix=-i1
+		Integer j
+		for(j=iZ;j<rest.size();j++) if(sch==rest[j]){ ix=j; break }
+		if(ix<iZ)return false
+		rest.remove((int)ix)
+	}
+	return true
+}
+
 @CompileStatic
 private static LinkedHashMap initCncl(){ return [(sSTMTS):[],(sCONDITIONS):[],(sALL):false] as LinkedHashMap }
 
@@ -3773,28 +3820,30 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 	if(!gtPOpt(r9,sMPS)) mMs(r9,sST)[sNEW]= sMs(mMs(r9,sST),sAUTONEW) ?: sTRUE
 
 	Boolean myPep=isPep(r9)
-	List<Map> schedules,ts
+	List<Map> schedules
 	schedules=sgetSchedules(sPROCS,myPep)
 	Integer oSz=schedules.size()
-	ts=[]+schedules
+	List<Map> orig=[]+schedules
+	Boolean wroteMid; wroteMid=false
 	Boolean lg=isTrc(r9)
 
-	if(ts){
+	// each cancellation type is one removeAll pass (List.remove(Map) rescans and deep-compares every schedule)
+	if(schedules){
 		Map cncls=mMs(r9,sCNCLATNS)
 		if(bIs(cncls,sALL)){
 			//cancel all statement and any other pending -3,-5 events (device schedules); does not cancel EVERY blocks -1 iN1 or $:0 condition requests
 			if(lg)whatCnclsA(r9)
-			for(Map sch in ts){
-				Integer i=iMs(sch,sI)
-				if(i>iZ || i in ListIN35) schedules.remove(sch)
+			final List<Integer> l35=ListIN35; final String itt=sI; final Integer izz=iZ // compiler bug?
+			schedules.removeAll{ Map sch ->
+				Integer i=iMs(sch,itt)
+				return i>izz || i in l35
 			}
 			r9[sLSTPCQ]=null
 			r9[sLSTPCSNT]=null
-			ts=[]+schedules
 		}
 
 		//cancel statements
-		if(ts){
+		if(schedules){
 			List<Map>cncStmts= liMs(cncls,sSTMTS)
 			if(cncStmts){
 				Set<Integer> cncIds=new HashSet<Integer>()
@@ -3818,26 +3867,28 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 					return dval instanceof String && ds.contains((String)dval)
 				}
 			}
-			ts=[]+schedules
 
 			//cancel on conditions
-			if(ts){
-				for(Integer cid in (List<Integer>)cncls[sCONDITIONS]){
-					ts=[]+schedules
-					if(ts)
-						for(Map sch in ts)
-							if(cid in (List)sch[sCS]) schedules.remove(sch)
+			List<Integer> cncConds=(List<Integer>)cncls[sCONDITIONS]
+			if(schedules && cncConds){
+				Set<Integer> cids=new HashSet<Integer>()
+				for(def c in cncConds) if(c!=null) cids << ((Number)c).intValue()
+				final String ctt = sCS // compiler bug?
+				schedules.removeAll{ Map sch ->
+					List cs=(List)sch[ctt]
+					if(cs) for(def c in cs) if(c!=null && cids.contains(((Number)c).intValue())) return true
+					return false
 				}
-				//cancel on piston state change
-				ts=[]+schedules
-				if(ts && bIs(r9,sPSTNSTC)){
-					if(lg){
-						updateSchCache(r9,schedules,sPROCS+s0,sT,myPep)
-						whatCnclsP(r9)
-					}
-					for(Map sch in ts)
-						if(iMs(sch,sPS)!=iZ) schedules.remove(sch)
+			}
+			//cancel on piston state change
+			if(schedules && bIs(r9,sPSTNSTC)){
+				if(lg){
+					updateSchCache(r9,schedules,sPROCS+s0,sT,myPep)
+					wroteMid=true
+					whatCnclsP(r9)
 				}
+				final String ptt = sPS; final Integer pzz=iZ // compiler bug?
+				schedules.removeAll{ Map sch -> iMs(sch,ptt)!=pzz }
 			}
 		}
 	}
@@ -3848,7 +3899,8 @@ private void processSchedules(Map r9,Boolean scheduleJob=false){
 	// write back only when schedules were cancelled or added (saves a state write and cache update per event)
 	if(nSchs || schedules.size()!=oSz){
 		schedules=schedules+nSchs
-		updateSchCache(r9,schedules,sPROCS+s1,sT,myPep)
+		// e.g. a time condition cancels and re-requests the identical wakeup on every run: nothing to save
+		if(wroteMid || !sameSchs(schedules,orig)) updateSchCache(r9,schedules,sPROCS+s1,sT,myPep)
 	}
 
 	if(scheduleJob){
@@ -7541,7 +7593,10 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 			Map attribute=operA ? Attributes()[operA]:[:]
 			Map aM=(attribute && bIs(attribute,sP) ? [(sP): (sMs(operand,sP)?:sA) ] :[:]) as LinkedHashMap // .p - device support p- physical vs. s- digital, a-any
 			for(String d in expandDeviceList(r9,liMd(operand))){
-				Map value=[(sI): d+sCLN+operA,(sV):getDeviceAttribute(r9,d,operA,operand[sI],trigger)+movt+aM]
+				Map dv=getDeviceAttribute(r9,d,operA,operand[sI],trigger) // always a fresh map
+				if(movt) dv.putAll(movt)
+				if(aM) dv.putAll(aM)
+				Map value=[(sI): d+sCLN+operA,(sV):dv]
 				//updateCache(r9,value,t)
 				vals.push(value)
 			}
@@ -7645,7 +7700,8 @@ private evaluateOperand(Map r9,Map node,Map oper,Integer index=null,Boolean trig
 						asum+= (List)tmp
 					}else asum.push(tmp)
 				}
-				mv=rtnMap(sDEV,asum)+movt
+				mv=rtnMap(sDEV,asum)
+				if(movt) mv.putAll(movt)
 			}else{
 				Boolean hasI=sMs(operand,sXI)!=sNL
 				if(hasI)movt=ovt ? [(sVT):ovt.replace(sLRB,sBLK)] as LinkedHashMap : mEMPTY
@@ -8235,7 +8291,15 @@ private List<Map> listPreviousStates(Map r9,device,String attr,Long threshold,Bo
 		myDetail r9,mySt+s1,i1
 	}
 	List<Map> res=[]
-	List<Event> events=((List<Event>)device.events([all: true,max: i100])).findAll{ it -> (String)it.getName()==attr}
+	// one query for just this attribute (newest first) instead of the last 100 events of every attribute.
+	// Queried from the epoch so the list still reaches one state older than the threshold, which the loop below needs.
+	List events
+	try{
+		List<State> sts=(List<State>)device.statesSince(attr,new Date(lZ),[max: i100])
+		events= sts!=null ? sts.sort(false){ State a,State b -> ((Date)b.getDate()).getTime()<=>((Date)a.getDate()).getTime() } : []
+	}catch(ignored){
+		events=((List<Event>)device.events([all: true,max: i100])).findAll{ it -> (String)it.getName()==attr}
+	}
 	//if we need to exclude last event we start at the second event as the first one is the event that triggered execution.
 	// The attribute's value has to be different from the current one to qualify for quiet
 	Integer sz=events.size()
@@ -8245,7 +8309,7 @@ private List<Map> listPreviousStates(Map r9,device,String attr,Long threshold,Bo
 		Long thresholdTime=elapseT(threshold)
 		Long endTime; endTime=wnow()
 		Integer i
-		Event curEvt
+		def curEvt
 		for(i=iZ; i<sz; i++){
 			curEvt=events[i]
 			Long startTime=((Date)curEvt[sDATE]).getTime()
@@ -8753,6 +8817,18 @@ private void updateCacheFld(Map r9,String nm,Object v,String s,Boolean gm){
 		}
 		releaseTheLock(id)
 	}
+}
+
+/** take the piston's stripe lock for a batch of cache updates, only while the cache is valid, so a cache rebuild
+ *  (state reads, parent calls) does not run under it. Inner getTheLock/releaseTheLock calls then only count
+ *  re-entrantly. Returns true when held; the caller must releaseTheLock(myId) in a finally */
+@CompileStatic
+private Boolean lockWarm(String myId,String meth){
+	getTheLock(myId,meth)
+	Map e=theCacheVFLD[myId]
+	if(e && e[sCACHE] instanceof Map && e[sBLD] instanceof Integer) return true
+	releaseTheLock(myId)
+	return false
 }
 
 /** shared empty key list for getCachedFields validity checks; never modified */
@@ -10378,6 +10454,31 @@ private void clearVariable(Map r9,String n){
  */
 @CompileStatic
 private void updateVariable(Map r9,String n, Map variable, Boolean clear=false){
+	// during a (serialized, non-pep) execution, collect changes and persist once in finalizeEvent
+	Map<String,Map> pnd=(Map<String,Map>)r9[sPNDVARS]
+	if(pnd!=null && !isPep(r9)){
+		pnd[n]= clear ? ([(sC):true] as Map) : ([(sV):oMv(variable)] as Map)
+		return
+	}
+	persistVariables(r9,[(n):(clear ? ([(sC):true] as Map) : ([(sV):oMv(variable)] as Map))] as Map<String,Map>)
+}
+
+@Field static final String sPNDVARS='pndVars'
+
+/** persist and reset batched local variable changes (keeps batching enabled) */
+@CompileStatic
+private void flushVariables(Map r9){
+	Map<String,Map> pnd=(Map<String,Map>)r9[sPNDVARS]
+	if(pnd){
+		r9[sPNDVARS]=[:] as LinkedHashMap
+		persistVariables(r9,pnd)
+	}
+}
+
+/** write pending local variable changes; changes is name -> [v:value] or [c:true] (clear) */
+@CompileStatic
+private void persistVariables(Map r9,Map<String,Map> changes){
+	if(!changes)return
 	Map<String,Object> vars
 	Map t0=getCachedFields(sSTVAR,[sVARS])
 	if(t0!=null){
@@ -10387,20 +10488,27 @@ private void updateVariable(Map r9,String n, Map variable, Boolean clear=false){
 		Map nc=theCacheVFLD[id]
 		Map m0=nc ? mMs(nc,sVARS):mMs(t0,sVARS)
 		vars= m0!=null ? new LinkedHashMap<String,Object>(m0):new LinkedHashMap<String,Object>()
-		if(clear) vars.remove(n)
-		else vars[n]=oMv(variable)
+		applyVarChanges(vars,changes)
 		if(nc)nc[sVARS]=vars
 		releaseTheLock(id)
 	}else{
 		vars=isPep(r9) ? (Map)gtAS(sVARS):(Map)gtSt(sVARS)
-		if(clear) vars.remove(n)
-		else vars[n]=oMv(variable)
+		if(vars==null) vars=new LinkedHashMap<String,Object>()
+		applyVarChanges(vars,changes)
 	}
 	mb()
 
 	// update the Hubitat persistence always
 	if(isPep(r9))assignAS(sVARS,vars) // atomicState is immiediate for other readers (DB access on Hubitat)
 	else assignSt(sVARS,vars)		  // state will be written back at end of execution (Hubitat behavior)
+}
+
+@CompileStatic
+private static void applyVarChanges(Map<String,Object> vars,Map<String,Map> changes){
+	for(Map.Entry<String,Map> e in changes){
+		if(bIs(e.value,sC)) vars.remove(e.key)
+		else vars[e.key]=e.value[sV]
+	}
 }
 
 @CompileStatic
@@ -11039,7 +11147,10 @@ private Map evaluateExpression(Map r9,Map express,String rtndataType=sNL){
 				if(!match && t0 && rtndataType==t0) match=matchCastD(t1,rtndataType)
 				if(!match)t1=cast(r9,t1,rtndataType,t0)
 			}
-			result=rtnMap(rtndataType,t1)+((ra ? [(sA):ra]:[:]) as Map)+((ri!=null ? [(sI):ri]:[:]) as Map)
+			Map rr=rtnMap(rtndataType,t1) // fresh map: add the optional fields in place
+			if(ra) rr[sA]=ra
+			if(ri!=null) rr[sI]=ri
+			result=rr
 		}
 	}
 	// no timing key on the result: 'd' on values means a device id (okComp, valueWas, matched device lists, cache checks)
@@ -12568,6 +12679,8 @@ private Long gtWCTimeToday(Map r9,Long time){
 
 // precompiled: String.replaceAll/replaceFirst would compile the regex on every cast
 @Field static final Pattern pNONNUM=Pattern.compile(/[^-\d.eE]/)
+/** log line breaks (real or escaped) collapsed to a single \r */
+@Field static final Pattern pLOGNL=Pattern.compile(/(\r\n|\r|\n|\\r\\n|\\r|\\n)+/)
 @Field static final Pattern pTRAILZ=Pattern.compile(/(?:\.|(\.\d*?))0+$/)
 // HashSets: 'in' is a hash lookup instead of a list scan
 @Field static final Set<String> trueStrings= [ '1','true', "on", "open",  "locked",  "active",  "wet",           "detected",    "present",    "occupied",    "muted",  "sleeping"] as HashSet<String>
@@ -12927,40 +13040,70 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 
 	if(res==lnull && dateOrTimeOrString instanceof String){
 		String sdate=dateOrTimeOrString
-		try{ res=wtoDateTime(sdate).getTime() }catch(ignored){}
-
-		// additional ISO 8601 that Hubitat does not parse
+		// try the parse step that worked for this string last time first (failed steps cost exceptions)
+		Integer known=strTimeStepFLD[sdate]
+		if(known!=null) res=strToTimeStep(r9,known,sdate)
 		if(res==lnull){
-			try{ res=(new Date()).parse("yyyy-MM-dd'T'HH:mm z",sdate.replaceAll(/Z/," -0000")).getTime() }catch(ignored){}
-		}
-
-		// next 3 format local time formatting done by cast
-		if(res==lnull){
-			for(String fmt in ['EEE, MMM d yyyy @ h:mm:ss a z','EEE, MMM d yyyy','h:mm:ss a z']){
-				try{ res=(new Date()).parse(fmt,sdate).getTime(); break }catch(ignored){}
+			Integer st
+			for(st=iZ;st<=i7;st++){
+				if(known!=null && st==known)continue
+				res=strToTimeStep(r9,st,sdate)
+				if(res!=lnull){
+					if(strTimeStepFLD.size()>500) strTimeStepFLD.clear()
+					strTimeStepFLD[sdate]=st
+					break
+				}
 			}
 		}
+	}
 
-		if(res==lnull){
+	if(res==lnull && dateOrTimeOrString instanceof Date) res=((Date)dateOrTimeOrString).getTime()
+	return res!=lnull ? res:lZ
+}
+
+/** input string -> index of the strToTimeStep that parsed it */
+@Field static final ConcurrentHashMap<String,Integer> strTimeStepFLD=new ConcurrentHashMap<String,Integer>()
+@Field static final Pattern pTZSFX=Pattern.compile(/(\s[A-Z]{3}([+\-]\d{2}:\d{2}|\s\d{4})?$)/)
+@Field static final Pattern pTZ3=Pattern.compile(/\s[A-Z]{3}$/)
+
+/** one string parse attempt of stringToTime; returns null when this step does not apply / fails */
+private Long strToTimeStep(Map r9,Integer step,String sdate){
+	Long lnull=(Long)null
+	Long res; res=lnull
+	switch(step){
+		case iZ:
+			try{ res=wtoDateTime(sdate).getTime() }catch(ignored){}
+			break
+		case i1: // additional ISO 8601 that Hubitat does not parse
+			try{ res=sdfParse("yyyy-MM-dd'T'HH:mm z",sdate.replace('Z',' -0000')).getTime() }catch(ignored){}
+			break
+		case i2: // next 3 format local time formatting done by cast
+			try{ res=sdfParse('EEE, MMM d yyyy @ h:mm:ss a z',sdate).getTime() }catch(ignored){}
+			break
+		case i3:
+			try{ res=sdfParse('EEE, MMM d yyyy',sdate).getTime() }catch(ignored){}
+			break
+		case i4:
+			try{ res=sdfParse('h:mm:ss a z',sdate).getTime() }catch(ignored){}
+			break
+		case i5:
 			try{ res=(new Date()).parse(sdate) }catch(ignored){}
-		}
-
-		if(res==lnull){
+			break
+		case i6:
 			try{
 				//get unix time
-				if(!(sdate =~ /(\s[A-Z]{3}([+\-]\d{2}:\d{2}|\s\d{4})?$)/)){
+				if(!pTZSFX.matcher(sdate).find()){
 					res=(Long)(new Date()).parse(sdate+sSPC+formatLocalTime(r9,wnow(),'Z'))
 				}
 			}catch(ignored){}
-		}
-
-		if(res==lnull){
+			break
+		case i7:
 			try{
 				TimeZone tz
 				tz=rTZ(r9)
 				String nsdate,t0
 				nsdate=sdate
-				if(nsdate =~ /\s[A-Z]{3}$/){ // is not the timezone, strings like CET are not unique.
+				if(pTZ3.matcher(nsdate).find()){ // is not the timezone, strings like CET are not unique.
 					try{
 						tz=TimeZone.getTimeZone(nsdate[-i3..-i1])
 						nsdate=nsdate[iZ..nsdate.size()-i3].trim()
@@ -12968,8 +13111,8 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 				}
 
 				t0=(nsdate?.trim() ?: sBLK).toLowerCase()
-				if(t0.endsWith('a.m.')) t0=t0.replaceAll('a\\.m\\.','am')
-				if(t0.endsWith('p.m.')) t0=t0.replaceAll('p\\.m\\.','pm')
+				if(t0.endsWith('a.m.')) t0=t0.replace('a.m.','am')
+				if(t0.endsWith('p.m.')) t0=t0.replace('p.m.','pm')
 				Boolean hasAM=t0.endsWith('am')
 				Boolean hasPM=t0.endsWith('pm')
 				Boolean hasMeridian=hasAM || hasPM
@@ -12979,7 +13122,7 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 
 				try{
 					if(t0.length()==i8){
-						time=(new Date()).parse('HH:mm:ssXX',t0+'-0000').getTime()
+						time=sdfParse('HH:mm:ssXX',t0+'-0000').getTime()
 						time=gtWCTimeToday(r9,time)
 					}else time=wtimeToday(t0,tz).getTime()
 				}catch(ignored){}
@@ -12995,24 +13138,23 @@ private Long stringToTime(Map r9,dateOrTimeOrString){
 				}
 				res=time ?: lZ
 			}catch(ignored){}
-		}
+			break
 	}
-
-	if(res==lnull && dateOrTimeOrString instanceof Date) res=((Date)dateOrTimeOrString).getTime()
-	return res!=lnull ? res:lZ
+	return res
 }
 
 @CompileStatic
 private String formatLocalTime(Map r9,time,String format=sNL){
 	def nTime; nTime=time
-	Double aa
-	Boolean fnd; fnd=false
-	try{
-		aa= nTime as Double
-		fnd=true
-	}catch(ignored){}
-	if(fnd || time instanceof Long || "${time}".isNumber()){
-		Long lt; lt= fnd ? aa.toLong():"${time}".toLong()
+	Double aa; aa=null
+	// type checks instead of a thrown exception for Date / non-numeric values
+	if(time instanceof Number) aa=((Number)time).doubleValue()
+	else if(time instanceof String || time instanceof GString){
+		String ts=time.toString()
+		if(ts.isNumber()) aa=ts as Double
+	}
+	if(aa!=null){
+		Long lt; lt= aa.toLong()
 		if(lt<lMSDAY)lt=gtWCTimeToday(r9,lt)
 // deal with a time in sec (vs. ms)
 		if(lt<Math.round((wnow()/d1000+86400.0D*365.0D).toDouble()) )lt=Math.round((lt*d1000).toDouble())
@@ -13025,9 +13167,30 @@ private String formatLocalTime(Map r9,time,String format=sNL){
 	}
 	String myformat= format!=sNL ? format : 'EEE, MMM d yyyy @ h:mm:ss a z'
 	Date d=(Date)nTime
-	SimpleDateFormat formatter=new SimpleDateFormat(myformat)
+	SimpleDateFormat formatter=gtSdf(myformat)
 	formatter.setTimeZone(rTZ(r9))
 	return formatter.format(d)
+}
+
+/** SimpleDateFormat templates by pattern; each caller gets its own clone (SimpleDateFormat is not thread safe) */
+@Field static final ConcurrentHashMap<String,SimpleDateFormat> sdfFLD=new ConcurrentHashMap<String,SimpleDateFormat>()
+
+@CompileStatic
+private static SimpleDateFormat gtSdf(String fmt){
+	SimpleDateFormat t; t=sdfFLD[fmt]
+	if(t==null){
+		t=new SimpleDateFormat(fmt)
+		// cache a separate, never-used template (bounded: formats can be user supplied); this caller keeps t
+		if(sdfFLD.size()<i100) sdfFLD.putIfAbsent(fmt,(SimpleDateFormat)t.clone())
+		return t
+	}
+	return (SimpleDateFormat)t.clone()
+}
+
+/** like Date.parse(fmt,str) (local default time zone) but reuses the cached pattern */
+@CompileStatic
+private static Date sdfParse(String fmt,String str){
+	return gtSdf(fmt).parse(str)
 }
 
 @CompileStatic
@@ -13177,7 +13340,7 @@ private Map log(message,Map r9,Integer shift=iN2,Exception err=null,String cmd=s
 		Boolean hasErr=(merr!=null && !!merr)
 		Boolean didTrunc; didTrunc = false
 		if(svLog && r9[sLOGS] instanceof List){
-			myMsg=myMsg.replaceAll(/(\r\n|\r|\n|\\r\\n|\\r|\\n)+/,"\r")
+			myMsg=pLOGNL.matcher(myMsg).replaceAll("\r")
 			if(myMsg.size()>1024){
 				myMsg=myMsg[iZ..1023]+'...[TRUNCATED]'
 				didTrunc = true
@@ -13197,7 +13360,7 @@ private Map log(message,Map r9,Integer shift=iN2,Exception err=null,String cmd=s
 		}
 		String myPad=sSPC
 		if(hasErr) myMsg+="$merr".toString()
-		if((mcmd in [sERROR,sWARN]) || hasErr || force || !svLog || bIs(r9,sLOGHE) || isEric(r9)) doLog(mcmd, myPad+prefix+sSPC+myMsg, didTrunc)
+		if(mcmd==sERROR || mcmd==sWARN || hasErr || force || !svLog || bIs(r9,sLOGHE) || isEric(r9)) doLog(mcmd, myPad+prefix+sSPC+myMsg, didTrunc)
 	}else doLog(mcmd,myMsg)
 	return [:]
 }
@@ -13222,7 +13385,7 @@ void doLog(String mcmd, String msg, Boolean didTrunc=false){
 			clr= sCLRRED
 	}
 	String myMsg
-	myMsg= msg.replaceAll(sLTH, '&lt;').replaceAll(sGTH, '&gt;')
+	myMsg= msg.replace(sLTH, '&lt;').replace(sGTH, '&gt;')
 	if(!didTrunc && myMsg.size()>600) myMsg=myMsg[iZ..599]+'...[TRUNCATED at doLog]'
 	log."$mcmd" span(myMsg,clr)
 }
@@ -13558,7 +13721,7 @@ private void getLocalVariables(Map r9,Map aS, Boolean frc=true, Boolean proxy=fa
 /** UI will not display anything that starts with $current or $previous; variables without d:true and non-null value will not display */
 @CompileStatic
 private Map<String,LinkedHashMap> getSystemVariablesAndValues(Map r9){
-	LinkedHashMap<String,LinkedHashMap> result=getSystemVariables()
+	LinkedHashMap<String,LinkedHashMap> result=getSystemVariablesCopy() // entries are modified below
 	LinkedHashMap<String,LinkedHashMap> c=(LinkedHashMap<String,LinkedHashMap>)r9[sPCACHE]
 	def res
 	for(Map.Entry<String,LinkedHashMap> variable in result){
@@ -13584,12 +13747,30 @@ private static LinkedHashMap<String,LinkedHashMap> getSystemVariables(){
 		tmpl=buildSysVarTemplate()
 		sysVarsTemplateFLD=tmpl
 	}
-	// Return a new outer map with each value entry shallow-copied so sV mutations stay per-execution.
+	// New outer map sharing the template entries (copy-on-write): every value write goes through
+	// setSysV, which replaces the entry with a copy, so the shared template is never modified
+	return new LinkedHashMap<String,LinkedHashMap>(tmpl)
+}
+
+/** fully copied system variables, for callers that modify every entry (dashboard listing) */
+private static LinkedHashMap<String,LinkedHashMap> getSystemVariablesCopy(){
+	LinkedHashMap<String,LinkedHashMap> tmpl=getSystemVariables()
 	LinkedHashMap<String,LinkedHashMap> result=new LinkedHashMap<String,LinkedHashMap>(tmpl.size()*2)
 	for(Map.Entry<String,LinkedHashMap> e in tmpl.entrySet()){
 		result[(String)e.key]=(LinkedHashMap)([:]+e.value)
 	}
 	return result
+}
+
+/** set a system variable value; copies the entry first since entries are shared with the template */
+@CompileStatic
+private static void setSysV(Map r9,String nm,value){
+	Map<String,Map> sysV=msMs(r9,sSYSVARS)
+	Map var=sysV[nm]
+	if(var==null)return
+	LinkedHashMap nv=new LinkedHashMap(var)
+	nv[sV]=value
+	sysV[nm]=nv
 }
 
 @CompileStatic
@@ -13868,7 +14049,7 @@ private static void stSysVarVal(Map r9,String nm,value/*,Boolean cachePersist=tr
 		else c.remove(nm)
 		r9[sPCACHE]=c
 	}
-	((Map)((Map)r9[sSYSVARS])[nm])[sV]=value
+	setSysV(r9,nm,value)
 }
 
 @Field static final String sTEMP='temp'
@@ -14256,8 +14437,12 @@ private void waddInUseGlobalVar(Map r9,String vn,Boolean heglobal=true,Boolean e
 			break
 		}
 	}
-	if(heglobal && exists) addInUseGlobalVar(vn)
+	// platform call only once per piston/variable; memo is cleared by wremoveAllInUseGlobalVar (piston update/delete)
+	if(heglobal && exists && hubVarInUseFLD.putIfAbsent(sa+sCLN+vn,true)==null) addInUseGlobalVar(vn)
 }
+
+/** hub variables this piston has already registered with addInUseGlobalVar, keyed appId:varName */
+@Field static final ConcurrentHashMap<String,Boolean> hubVarInUseFLD=new ConcurrentHashMap<String,Boolean>()
 
 Map<String,List> gtGlobalVarsInUse(){
 	String wName= sPAppId()
@@ -14279,6 +14464,8 @@ private void wremoveAllInUseGlobalVar(){
 		}
 	}
 
+	String pre=sa+sCLN
+	for(String k in hubVarInUseFLD.keySet()) if(k.startsWith(pre)) hubVarInUseFLD.remove(k)
 	removeAllInUseGlobalVar()
 }
 

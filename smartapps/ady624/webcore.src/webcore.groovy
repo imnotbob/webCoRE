@@ -18,7 +18,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- * Last update October 13, 2026 for Hubitat
+ * Last update October 14, 2026 for Hubitat
  */
 
 /*
@@ -181,7 +181,7 @@
 
 @Field static final String sVER='v0.3.114.20220203'
 @Field static final String sHVER='v0.3.114.20240115_HE'
-@Field static final String sHVERSTR='v0.3.114.20240115_HE - October 13, 2026'
+@Field static final String sHVERSTR='v0.3.114.20240115_HE - October 14, 2026'
 
 static String version(){ return sVER }
 static String HEversion(){ return sHVER }
@@ -228,6 +228,8 @@ import groovy.transform.CompileStatic
 import groovy.transform.Field
 import java.security.MessageDigest
 import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 import java.util.zip.GZIPOutputStream
 
 import com.hubitat.hub.domain.Location
@@ -1631,9 +1633,12 @@ private static String normalizeLabel(pisN){
 	return normalizeString(label)
 }
 
+@Field volatile static Pattern pSPANSTYLEFLD=null
 private static String normalizeString(String s){
-	String regex=' <span style.*$'
-	String t0=s.replaceAll(regex, sBLK)
+	if(s==sNL) return s
+	Pattern pt; pt=pSPANSTYLEFLD
+	if(pt==null){ pt=Pattern.compile(' <span style.*$'); pSPANSTYLEFLD=pt }
+	String t0=pt.matcher(s).replaceAll(sBLK)
 	return t0!=sNL ? t0 : s
 }
 
@@ -1643,10 +1648,15 @@ private void wpauseExecution(Long t){ pauseExecution(t) }
 
 @CompileStatic
 Boolean getTheLock(String meth=sNL){
-	Long waitT=1600L
+	// timed tryAcquire returns as soon as the lock is released; waitT only paces the override check
+	Long waitT=250L
 	Boolean wait; wait=false
 	Semaphore sema=theSerialLockFLD
-	while(!sema.tryAcquire()){
+	while(true){
+		Boolean got
+		try{ got=sema.tryAcquire(wait ? waitT:lZ,TimeUnit.MILLISECONDS) }
+		catch(InterruptedException ignored){ got=false }
+		if(got) break
 		// did not get the lock
 		Long t; t=lockTimeFLD
 		if(t==null){
@@ -1654,7 +1664,6 @@ Boolean getTheLock(String meth=sNL){
 			lockTimeFLD=t
 		}
 		//if(eric())log.warn "waiting for ${qname} lock access $meth"
-		wpauseExecution(waitT)
 		wait=true
 		if((wnow()-t) > 30000L){
 			// Drain any lingering permits so we start from a known locked state
@@ -1735,7 +1744,7 @@ void clearCachedchildApps(String wName, Boolean haveLock=false){
  */
 @CompileStatic
 private List<Map> presult(String wName,Boolean haveLock=false){
-	List<Map> a= gtCachedchildApps(wName,haveLock).sort{ Map it -> sMs(it,'label') }.collect{ Map it ->
+	List<Map> a= gtCachedchildApps(wName,haveLock).collect{ Map it -> // already sorted by label
 		String pid= sMs(it,'pid')
 		/*Map meta=[
 			(sA):isAct(t0),
@@ -1752,6 +1761,24 @@ private List<Map> presult(String wName,Boolean haveLock=false){
 		pitem(pid, (String)it.nlabel, meta)
 	}
 	a
+}
+
+/** fill piston metadata cache for any piston missing it, using the cached child wrappers */
+private void warmMeta(String wName){
+	List<Map> apps=gtCachedchildApps(wName)
+	if(pStateFLD[wName]==null){ clearMeta(wName) }
+	Map<String,Map> cache=pStateFLD[wName]
+	for(Map it in apps){
+		String pid=sMs(it,'pid')
+		if(cache[pid]==null) Map a=gtMeta(findCachedChild(wName,sMs(it,sID)),wName,pid)
+	}
+}
+
+/** find a piston wrapper in the cached raw child list by app id (no child app enumeration).
+ *  Only used where a stale handle is harmless (metadata warmup); findPiston() still verifies against live child apps */
+private InstalledAppWrapper findCachedChild(String wName, String appId){
+	List<InstalledAppWrapper> raw=childAppsRawFLD[wName]
+	return raw ? raw.find{ it.id.toString()==appId } : null
 }
 
 Map pitem(String pid, String n, Map meta){
@@ -1808,6 +1835,8 @@ private void invalidatePistonCaches(String wName, String schld=sNL, String meth=
 private Map<String,Object> api_get_base_result(){
 	String t='baseR'
 	String wName=sAppId()
+
+	warmMeta(wName) // fetch any missing piston metadata (child calls) outside the lock
 
 	Boolean didw=getTheLock(t)
 
@@ -1995,11 +2024,12 @@ private api_intf_dashboard_load(){
 
 	String wName=sAppId()
 	String sess=sMs(p,'session') ?: 'default'
+	String jsonData; jsonData=sNL
 	if(!err && result){
 		msg+=' no error & result'
 		String tok=sMs(p,'token')
 		if(result)result.remove('now')
-		String jsonData= JsonOutput.toJson(result)
+		jsonData= JsonOutput.toJson(result)
 		String rl=generateMD5_A(jsonData)
 		Long t=wnow()
 		if(!lastDActivityFLD[wName] || !lastDActivityTOKFLD[wName] || !tlastDActivityFLD[wName]){
@@ -2017,6 +2047,7 @@ private api_intf_dashboard_load(){
 		}else{
 			msg+=' using cache'
 			result=[:]
+			jsonData=sNL
 		}
 		tlastDActivityFLD[wName][sess]=t
 		tlastDActivityFLD= tlastDActivityFLD
@@ -2027,11 +2058,19 @@ private api_intf_dashboard_load(){
 
 	//debug "Dashboard: load ${params} " +msg
 
-	if(getLogging()[sDBG]) checkResultSize(result, false, s)
+	if(getLogging()[sDBG]){
+		checkResultSize(result, false, s)
+		jsonData=sNL // checkResultSize may trim result
+	}
 
 	//for accuracy, use the time as close as possible to the render
-	result.put(sNOW,wnow())
-	renderRes(result)
+	if(jsonData && jsonData.length()>2 && jsonData.endsWith('}')){
+		// splice "now" into the already serialized result rather than serializing it again
+		renderJson(jsonData.substring(iZ,jsonData.length()-i1)+',"'+sNOW+'":'+wnow().toString()+'}')
+	}else{
+		result.put(sNOW,wnow())
+		renderRes(result)
+	}
 }
 
 private api_intf_dashboard_devices(){
@@ -2180,9 +2219,9 @@ private api_intf_dashboard_piston_getDb(){
 					physical: gtAllCommands(),
 					virtual: virtualCommands().sort{ (String)it.value.d!=sNL ? (String)it.value.d : (String)it.value.n }
 				],
-				attributes: attributesFLD.sort{ (String)it.key },
-				comparisons: comparisonsFLD,
-				functions: functionsFLD,
+				attributes: attributesL().sort{ (String)it.key },
+				comparisons: comparisonsL(),
+				functions: functionsL(),
 				colors: [
 					//standard: colorUtil?.ALL ?: getColors()
 					standard: getColors()
@@ -2204,7 +2243,7 @@ private api_intf_dashboard_piston_get(){
 		String pistonId=sMs(p,'id')
 		InstalledAppWrapper piston=findPiston(pistonId)
 		if(piston){
-			debug "Dashboard: Request received to get piston ${pistonId} ${(String)piston.label}"
+			if(isDbg()) debug "Dashboard: Request received to get piston ${pistonId} ${(String)piston.label}"
 
 			String serverDbVersion=sHVER
 			String clientDbVersion=sMs(p,'db')
@@ -2219,9 +2258,9 @@ private api_intf_dashboard_piston_get(){
 						physical: commands().sort{ (String)it.value.d!=sNL ? (String)it.value.d : (String)it.value.n },
 						virtual: virtualCommands().sort{ (String)it.value.d!=sNL ? (String)it.value.d : (String)it.value.n }
 					],
-					attributes: attributesFLD.sort{ (String)it.key },
-					comparisons: comparisonsFLD,
-					functions: functionsFLD,
+					attributes: attributesL().sort{ (String)it.key },
+					comparisons: comparisonsL(),
+					functions: functionsL(),
 					colors: [
 						//standard: colorUtil?.ALL ?: getColors()
 						standard: getColors()
@@ -2311,14 +2350,14 @@ private api_intf_dashboard_piston_backup(){
 				if(pd){
 					pd.instance=[(sID): getInstanceSid(), (sNM): myN]
 					Boolean a=result.pistons.push(pd)
-					if(!isCustomEndpoint() || !gtSetB('localHubUrl')){
-						String jsonData= JsonOutput.toJson(result)
-						Integer responseLength=jsonData.getBytes(sUTF8).length
-						if(responseLength > 110 * 1024){
-							warn "Backup too big ${ (Integer)(responseLength/1024) }KB response"
-						}
-					}
 				}
+			}
+		}
+		if(result.pistons && (!isCustomEndpoint() || !gtSetB('localHubUrl'))){
+			String jsonData= JsonOutput.toJson(result)
+			Integer responseLength=jsonData.getBytes(sUTF8).length
+			if(responseLength > 110 * 1024){
+				warn "Backup too big ${ (Integer)(responseLength/1024) }KB response"
 			}
 		}
 	}else{ result=api_get_error_result(sERRTOK,'piston_backup') }
@@ -2408,7 +2447,7 @@ private api_intf_dashboard_piston_set_chunk(){
 	String ckey=wName+sCLN+sMs(p,'token')
 	String mchunk="${p?.chunk}".toString()
 	Integer chunk=mchunk.isInteger() ? mchunk.toInteger() : -i1
-	debug "Dashboard: Request received to set a piston chunk (#${1 + chunk}/${pPistonChunksFLD[ckey]?.count})"
+	if(isDbg()) debug "Dashboard: Request received to set a piston chunk (#${1 + chunk}/${pPistonChunksFLD[ckey]?.count})"
 	if(verifySecurityToken(p)){
 		String data=(String)p?.data
 		mb()
@@ -2800,6 +2839,7 @@ private Long getMidnightTime(){
 
 
 void resetFuelStreamList(){
+	fuelAppIdFLD.remove(sAppId())
 	state.fuelStreams=[]
 /*
 	name=handleFuelS()
@@ -2825,6 +2865,17 @@ InstalledAppWrapper findCreateFuel(Map req){
 
 	}else{
 		String streamName="${(req[sC] ?: sBLK)}||${req[sN]}"
+		String wName=sAppId()
+		Map<String,Long> fcache=fuelAppIdFLD[wName]
+		Long cid= fcache ? fcache[streamName] : null
+		if(cid!=null){
+			InstalledAppWrapper ca; ca=null
+			try{ ca=(InstalledAppWrapper)getChildAppById(cid) }catch(ignored){}
+			String sl= ca ? (String)ca.label : sNL
+			Integer ndx= sl ? sl.indexOf(' - ') : -i1
+			if(ndx>=iZ && sl.substring(ndx + i3)==streamName) return ca
+			fcache.remove(streamName) // stale (deleted or relabeled)
+		}
 		List<InstalledAppWrapper> allFuel=wgetChildApps().findAll{ (String)it.name==n }
 		List<InstalledAppWrapper> l
 		l=allFuel.findAll{ ((String)it.label)?.contains(streamName) }
@@ -2856,9 +2907,15 @@ InstalledAppWrapper findCreateFuel(Map req){
 				return null
 			}
 		}
+		if(result){
+			if(fuelAppIdFLD[wName]==null){ fuelAppIdFLD[wName]=(Map)[:]; fuelAppIdFLD=fuelAppIdFLD }
+			fuelAppIdFLD[wName][streamName]=(Long)result.id
+		}
 	}
 	result
 }
+
+@Field volatile static Map<String,Map<String,Long>> fuelAppIdFLD= [:]
 
 List<Map> readFuelStream(Map req){
 	def result=findCreateFuel(req)
@@ -3214,7 +3271,7 @@ private api_execute(){
 		msg = "Piston not found for dashboard or web Request to execute a piston from IP $remoteAddr $pistonIdOrName"
 		error msg
 	}
-	debug "Dashboard or web request received to execute a piston from IP $remoteAddr Referer: ${request.headers.Referer} " + msg
+	if(isDbg()) debug "Dashboard or web request received to execute a piston from IP $remoteAddr Referer: ${request.headers.Referer} " + msg
 	result[sTMSTMP]=wnow()
 	wrender( [ (sCONTENTT): sAPPJAVA, (sDATA): JsonOutput.toJson(result) ] )
 }
@@ -3231,7 +3288,7 @@ private api_global(){
 	if(remoteAddr==null)remoteAddr=request.'X-forwarded-for' ?: request.Host
 	if(remoteAddr==null)remoteAddr='just'
 	Map p=(Map)params
-	debug "web request received to get variable from IP $remoteAddr Referer: ${request.headers.Referer} | $p"
+	if(isDbg()) debug "web request received to get variable from IP $remoteAddr Referer: ${request.headers.Referer} | $p"
 	Map result=[:]
 	Boolean err; err=true
 	String varName=sMs(p,'varName')
@@ -3282,10 +3339,13 @@ void resetMemSt(String meth,String wName){
 }
 
 @Field static final String sVC='ver check'
+@Field volatile static Map<String,Boolean> uidOkFLD= [:]
 /** check if webCoRE version has been updated */
 @CompileStatic
 void verCheck(String wName){
-	Boolean uuidChg= uidChgd()
+	// hub UID cannot change without a reboot (which clears static fields), so check state only once
+	Boolean uuidChg= uidOkFLD[wName] ? false : uidChgd()
+	if(!uuidChg) uidOkFLD[wName]=true
 	if(verFLD[wName]==sVER && HverFLD[wName]==sHVER && !uuidChg) return
 	if(verFLD[wName]==sNL || HverFLD[wName]==sNL){
 		if((String)gtSt('cV')==sVER && (String)gtSt('hV')==sHVER && !uuidChg){
@@ -3570,26 +3630,33 @@ Map<String,Object> listAvailableDevices(Boolean raw=false, Boolean batch=true, I
 		List<DeviceWrapper> myDevices
 		myDevices=(List<DeviceWrapper>)((Map<String,Object>)settings).findAll{
 			it.key.startsWith("dev:") }.collect{
-				it.value }.flatten().sort{ it.getDisplayName() }
+				it.value }.flatten()
 
-		List<DeviceWrapper> devices; devices=myDevices.unique{ it.id }
+		List<DeviceWrapper> devices; devices=null
 
 		if(raw){
-			rawResult=devices.collectEntries{ DeviceWrapper dev -> [(hashId(dev.id)): dev]}
+			// keyed by device id: duplicates collapse, and callers look devices up by id or label, so no sort needed
+			rawResult=myDevices.collectEntries{ DeviceWrapper dev -> [(hashId(dev.id)): dev]}
 
 		}else{
+			// sorted by name for the dashboard; drop duplicates in one pass (unique{} compares every pair)
+			Set seen=new HashSet()
+			devices=myDevices.sort{ it.getDisplayName() }.findAll{ DeviceWrapper dev -> seen.add(dev.id) }
 			Integer deviceCount=devices.size()
 			result.devices=[:]
 			if(devices){
 				devices=devices[offset..-i1]
 				Integer dsz=devices.size()
+				Integer responseLength; responseLength=32 // {"devices":{},"complete":false} overhead
 				result.complete=!devices.indexed().find{ Integer idx, DeviceWrapper dev ->
 //				log.debug "Loaded device at ${idx} after ${now() - time}ms. Data size is ${result.toString().size()}"
-					result.devices[hashId(dev.id)]=getDevDetails(dev, true)
+					String hid=hashId(dev.id)
+					Map det=getDevDetails(dev, true)
+					result.devices[hid]=det
 
 					Boolean stop; stop=false
-					String jsonData=JsonOutput.toJson(result)
-					Integer responseLength=jsonData.getBytes(sUTF8).length
+					// track serialized size incrementally: "hid":{...},
+					if(batch) responseLength+= JsonOutput.toJson(det).getBytes(sUTF8).length + hid.length() + 4
 					if(batch && (responseLength > 50000 || wnow()-time > 4000) ) stop=true
 					if(stop && idx < dsz-i1 ){
 						result.nextOffset= offset+idx+i1
@@ -3685,7 +3752,7 @@ Map getDevDetails(DeviceWrapper dev, Boolean addtransform=false){
 
 	newCL= newCL.unique{ (String)it[sN] }
 
-	Map allCmds= gtAllCommands() // built in commands
+	Map allCmds= commandsL() // built in commands (lookup only, no sort needed)
 
 	for (Map cmd in newCL){
 		String cmdName=cmd[sN]
@@ -4200,7 +4267,12 @@ InstalledAppWrapper wgetChildAppByLabel(String n){ (InstalledAppWrapper)getChild
 
 private Map renderRes(Map result){
 	//debug "wrender: params: ${params} "
-	wrender( [ (sCONTENTT): sAPPJAVA, (sDATA): (String)params.callback+'('+JsonOutput.toJson(result)+')' ] )
+	renderJson(JsonOutput.toJson(result))
+}
+
+/** render an already serialized JSON object string as a JSONP response */
+private Map renderJson(String json){
+	wrender( [ (sCONTENTT): sAPPJAVA, (sDATA): (String)params.callback+'('+json+')' ] )
 }
 
 @Field static final String sAE='Accept-Encoding'
@@ -4263,6 +4335,7 @@ static String string2gzip(String s){
 private Long elapseT(Long t,Long n=wnow()){ return Math.round(d1*n-t) }
 
 @Field volatile static Map<String,Map<String,Map>> p_executionFLD=[:]
+@Field static Semaphore statsLockFLD=new Semaphore(1)
 
 /**
  * wrapper to gather global piston execution statistics; calls updateRunTimeData
@@ -4276,28 +4349,35 @@ void pCallupdateRunTimeData(Map data){
 	String id=(String)data[sID]
 	String wName=sAppId()
 
-	Boolean didw=getTheLock(sRELAY)
-	if(p_executionFLD[wName]==null){ p_executionFLD[wName]=(Map)[:]; p_executionFLD=p_executionFLD }
+	// stats only: own short lock so piston runs don't contend with the global lock; if it can't be had
+	// within 2s, update anyway (worst case a lost stats sample)
+	Boolean got
+	try{ got=statsLockFLD.tryAcquire(2000L,TimeUnit.MILLISECONDS) }
+	catch(InterruptedException ignored){ got=false }
+	try{
+		if(p_executionFLD[wName]==null){ p_executionFLD[wName]=(Map)[:]; p_executionFLD=p_executionFLD }
 
-	Map record = p_executionFLD[wName][id]!=null ? (Map)p_executionFLD[wName][id] : [:]
+		Map record = p_executionFLD[wName][id]!=null ? (Map)p_executionFLD[wName][id] : [:]
 
-	List runs; runs = (List)record.execs!=null ? (List)record.execs : []
-	runs << [s: start, e: wnow()]
-	if(runs.size() > 200) runs = runs.drop(20)
+		List runs; runs = (List)record.execs!=null ? (List)record.execs : []
+		runs << [s: start, e: wnow()]
+		if(runs.size() > 200) runs = runs.drop(20)
 
-	Long cnt; cnt= record.cnt!=null ? (Long)record.cnt : 0L
-	cnt +=1L
+		Long cnt; cnt= record.cnt!=null ? (Long)record.cnt : 0L
+		cnt +=1L
 
-	Long tot; tot= record.tot!=null ? (Long)record.tot : 0L
-	tot += elapseT(start)
+		Long tot; tot= record.tot!=null ? (Long)record.tot : 0L
+		tot += elapseT(start)
 
-	record.cnt = cnt
-	record.execs = runs // add
-	record.tot = tot
+		record.cnt = cnt
+		record.execs = runs // add
+		record.tot = tot
 
-	p_executionFLD[wName][id]= record
-	p_executionFLD=p_executionFLD
-	releaseTheLock(sRELAY)
+		p_executionFLD[wName][id]= record
+		p_executionFLD=p_executionFLD
+	}finally{
+		if(got) statsLockFLD.release()
+	}
 
 	updateRunTimeData(data,wName,id)
 }
@@ -4312,41 +4392,48 @@ void pCallupdateRunTimeData(Map data){
 void updateRunTimeData(Map data, String wNi=sNL, String idi=sNL){
 	if(!data || !data[sID]) return
 	List<Map> variableEvents=[]
-	if(data[sGVCACHE]!=null){
-		Boolean didw=getTheLock(sURT)
-
-		def am=gtAS(sVARS)
-		Map<String,Map> vars= am? (Map<String,Map>)am : [:]
-		Boolean mdfd; mdfd=false
-		for(Map.Entry<String,Map>var in ((Map<String,Map>)data[sGVCACHE]) ){
-			String k=(String)var.key
-			if(k!=sNL && k.startsWith(sAT) && vars[k]){
-				def val=var.value[sV]
-				def oval=vars[k][sV]
-				if(val!=oval){
-					Boolean a=variableEvents.push([(sNM): k, oldValue: oval, (sVAL): val, (sTYPE): var.value.t])
-					vars[k][sV]=val
+	Boolean varsChgd; varsChgd=false
+	Boolean needL= data[sGVCACHE]!=null || data[sGVSTOREC]!=null
+	if(needL) Boolean didw=getTheLock(sURT) // one lock for both updates
+	try{
+		if(data[sGVCACHE]!=null){
+			def am=gtAS(sVARS)
+			Map<String,Map> vars= am? (Map<String,Map>)am : [:]
+			Boolean mdfd; mdfd=false
+			for(Map.Entry<String,Map>var in ((Map<String,Map>)data[sGVCACHE]) ){
+				String k=(String)var.key
+				if(k!=sNL && k.startsWith(sAT) && vars[k]){
+					def val=var.value[sV]
+					def oval=vars[k][sV]
+					if(val!=oval){
+						Boolean a=variableEvents.push([(sNM): k, oldValue: oval, (sVAL): val, (sTYPE): var.value.t])
+						vars[k][sV]=val
+						mdfd=true
+					}
+				}
+			}
+			if(mdfd){
+				assignAS(sVARS,vars)
+				varsChgd=true
+			}
+		}
+		if(data[sGVSTOREC]!=null){
+			def am=gtAS(sSTORE)
+			Map<String,Object> store= am? (Map<String,Object>)am : [:]
+			Boolean mdfd; mdfd=false
+			for(var in (Map<String,Object>)data[sGVSTOREC]){
+				String k=(String)var.key
+				if(var.value==null){
+					if(store.containsKey(k)){ store.remove(k); mdfd=true }
+				}else if(!store.containsKey(k) || store[k]!=var.value){ // only write the store when a value changed
+					store[k]=var.value
 					mdfd=true
 				}
 			}
+			if(mdfd)assignAS(sSTORE,store)
 		}
-		if(mdfd)assignAS(sVARS,vars)
-		releaseTheLock(sURT)
-	}
-	if(data[sGVSTOREC]!=null){
-		Boolean didw=getTheLock(sURT)
-
-		def am=gtAS(sSTORE)
-		Map<String,Object> store= am? (Map<String,Object>)am : [:]
-		Boolean mdfd; mdfd=false
-		for(var in (Map<String,Object>)data[sGVSTOREC]){
-			String k=(String)var.key
-			if(var.value==null) store.remove(k)
-			else store[k]=var.value
-			mdfd=true
-		}
-		if(mdfd)assignAS(sSTORE,store)
-		releaseTheLock(sURT)
+	}finally{
+		if(needL) releaseTheLock(sURT) // also on exceptions, so the lock is never leaked
 	}
 
 	// update piston metadata cache; cache what IDE wants and in IDE format
@@ -4367,7 +4454,10 @@ void updateRunTimeData(Map data, String wNi=sNL, String idi=sNL){
 	String wName= wNi ?: sAppId()
 	String id= idi ?: sMs(data,sID)
 	ptMeta(wName,id,piston)
-	clearBaseResult(sURT,wName)
+	// piston list/metadata in the cached base result is rebuilt from pStateFLD on every
+	// api_get_base_result() call, and dashboard_load's MD5 check detects the change; only
+	// global variables (instance.globalVars) need the cached base result discarded
+	if(varsChgd) clearBaseResult(sURT,wName)
 
 	//broadcast variable change events
 	for (Map variable in variableEvents){ // this notifies the other webCoRE master instances and children
@@ -4887,6 +4977,8 @@ private Map<String,Boolean> getLogging(){
 	return res
 }
 
+private Boolean isDbg(){ return getLogging()[sDBG] }
+
 private Map log(message, Integer shift=iN2, err=null, String cmd=sNL){
 	Long lnow=wnow()
 	if(cmd==sTIMER){
@@ -4972,7 +5064,7 @@ void doLog(String mcmd, String msg){
 		default:
 			clr= sCLRRED
 	}
-	String myMsg= msg.replaceAll(sLTH, '&lt;').replaceAll(sGTH, '&gt;')
+	String myMsg= msg.replace(sLTH, '&lt;').replace(sGTH, '&gt;')
 	log."$mcmd" span(myMsg,clr)
 }
 
@@ -5042,7 +5134,15 @@ static String span(String str,String clr=sNL,String sz=sNL,Boolean bld=false,Boo
 	//m=momentary
 	//s=number of subdevices
 	//i=subdevice index in event data
-@Field final Map<String,Map> capabilitiesFLD=[
+@Field volatile static Map<String,Map> capabilitiesFLD=null
+/** built once on first use, then shared by all executions (avoids rebuilding the literal every time the app runs) */
+private static Map<String,Map> capabilitiesL(){
+	Map<String,Map> r; r=capabilitiesFLD
+	if(r==null){ r=capabilitiesB(); capabilitiesFLD=r }
+	return r
+}
+private static Map<String,Map> capabilitiesB(){
+	return [
 	accelerationSensor	: [ (sN): "Acceleration Sensor",	(sD): "acceleration sensors",		(sA): "acceleration",								],
 	actuator			: [ (sN): "Actuator",				(sD): "actuators",																	],
 	airQuality			: [ (sN): "Air Quality Sensor",		(sD): "air quality sensors",		(sA): "airQualityIndex",							],
@@ -5145,13 +5245,14 @@ static String span(String str,String clr=sNL,String sz=sNL,Boolean bld=false,Boo
 	windowBlind			: [ (sN): "Window Blind",			(sD): "automatic window blinds",		(sA): "windowBlind",	(sC): [sCLOSE, sOPEN, "setPosition", "startPositionChange", "stopPositionChange", "setTiltLevel"],					],
 	windowShade			: [ (sN): "Window Shade",			(sD): "automatic window shades",		(sA): "windowShade",	(sC): [sCLOSE, sOPEN, "setPosition", "startPositionChange", "stopPositionChange"],					],
 ]
+}
 
 Map capabilities(){
-	return capabilitiesFLD
+	return capabilitiesL()
 }
 
 Map getChildAttributes(){
-	Map<String,Map> result=attributesFLD
+	Map<String,Map> result=attributesL()
 	Map<String,Map> cleanResult=[:]
 	Map defv=[(sN):sA]
 	for(it in result){
@@ -5170,7 +5271,15 @@ Map getChildAttributes(){
 	return cleanResult
 }
 
-@Field final Map<String,Map> attributesFLD=[
+@Field volatile static Map<String,Map> attributesFLD=null
+/** built once on first use, then shared by all executions (avoids rebuilding the literal every time the app runs) */
+private static Map<String,Map> attributesL(){
+	Map<String,Map> r; r=attributesFLD
+	if(r==null){ r=attributesB(); attributesFLD=r }
+	return r
+}
+private static Map<String,Map> attributesB(){
+	return [
 	acceleration		: [ (sN): "acceleration",		(sT): sENUM,		(sO): [sACT, sINACT],						],
 	activities			: [ (sN): "activities",			(sT): "object",											],
 	airQualityIndex		: [ (sN): "air quality index",	(sT): sINT,	(sR): [iZ, 500],		u: "AQI",				],
@@ -5315,14 +5424,21 @@ Map getChildAttributes(){
 // custom for Leak sensor
 	underHeat			: [ (sN): "under heat",			(sT): sENUM,		(sO): [sCLEAR, sDETECTED],						]
 ]
+}
 
 /*private Map attributes(){
-	return attributesFLD
+	return attributesL()
 }*/
 
 /* Push command has multiple overloads in hubitat */
 // the command r: is replaced with command c.
+@Field volatile static Map<String,Map> commandOverridesFLD=null
 private static Map<String,Map> commandOverrides(){
+	Map<String,Map> r; r=commandOverridesFLD
+	if(r==null){ r=commandOverridesB(); commandOverridesFLD=r }
+	return r
+}
+private static Map<String,Map> commandOverridesB(){
 	return ( [ //s: command signature
 		push	: [(sC): "push",	(sS): null , (sR): "pushMomentary"], // for capability momentary
 		flash	: [(sC): "flash",	(sS): null , (sR): "flashNative"] //flash native command conflicts with flash emulated command. Also needs "o" option on command described later
@@ -5347,7 +5463,15 @@ Map getChildCommands(){
 	return cleanResult
 }
 
-@Field final Map<String,Map> commandsFLD=[
+@Field volatile static Map<String,Map> commandsFLD=null
+/** built once on first use, then shared by all executions (avoids rebuilding the literal every time the app runs) */
+private static Map<String,Map> commandsL(){
+	Map<String,Map> r; r=commandsFLD
+	if(r==null){ r=commandsB(); commandsFLD=r }
+	return r
+}
+private static Map<String,Map> commandsB(){
+	return [
 	armAway				: [ (sN): "Arm Away",				(sA): "securityKeypad",		(sV): "armed away",				],
 	armHome				: [ (sN): "Arm Home",				(sA): "securityKeypad",		(sV): "armed home",				],
 	auto				: [ (sN): "Set to Auto",			(sA): sTHERM,					(sV): "auto",						],
@@ -5502,9 +5626,10 @@ Map getChildCommands(){
 	flashNative			: [ (sN): "Flash",																						],
 	pushMomentary		: [ (sN): "Push"																						]
 ]
+}
 
 private Map commands(){
-	return commandsFLD
+	return commandsL()
 }
 
 static Map getChildVirtCommands(){
@@ -5637,7 +5762,7 @@ private static Map<String,Map> virtualCommands(){
 @Field static final String sTRIGGERS='triggers'
 
 Map getChildComparisons(){
-	Map<String,Map<String,Map>> result=comparisonsFLD
+	Map<String,Map<String,Map>> result=comparisonsL()
 	Map<String,Map<String,Map>> cleanResult=[:]
 	cleanResult[sCONDITIONS]=[:] as Map<String,Map>
 	Map defv=[(sN):sA]
@@ -5682,7 +5807,15 @@ Map getChildComparisons(){
 //		e = email (not implemented)
 @Field static final String sDD='dd'
 @Field static final String sDI='di'
-@Field final Map<String,Map> comparisonsFLD=[
+@Field volatile static Map<String,Map> comparisonsFLD=null
+/** built once on first use, then shared by all executions (avoids rebuilding the literal every time the app runs) */
+private static Map<String,Map> comparisonsL(){
+	Map<String,Map> r; r=comparisonsFLD
+	if(r==null){ r=comparisonsB(); comparisonsFLD=r }
+	return r
+}
+private static Map<String,Map> comparisonsB(){
+	return [
 	conditions: [
 		changed				: [ (sD): "changed",									(sG):"bdfis",				(sT): i1	],
 		did_not_change		: [ (sD): "did not change",								(sG):"bdfis",				(sT): i1	],
@@ -5775,12 +5908,21 @@ Map getChildComparisons(){
 		stays_odd			: [ (sD): "is odd and stays odd",			(sDD): "are odd and stay odd",		(sG):sDI,					(sT): i1,	],
 	]
 ]
+}
 
 /*private Map comparisons(){
-	return comparisonsFLD
+	return comparisonsL()
 }*/
 
-@Field final Map<String,Map> functionsFLD=[
+@Field volatile static Map<String,Map> functionsFLD=null
+/** built once on first use, then shared by all executions (avoids rebuilding the literal every time the app runs) */
+private static Map<String,Map> functionsL(){
+	Map<String,Map> r; r=functionsFLD
+	if(r==null){ r=functionsB(); functionsFLD=r }
+	return r
+}
+private static Map<String,Map> functionsB(){
+	return [
 	age				: [ (sT): sINT,						],
 	previousage		: [ (sT): sINT,	(sD): "previousAge",	],
 	previousvalue	: [ (sT): sDYN,	(sD): "previousValue",	],
@@ -5896,9 +6038,10 @@ Map getChildComparisons(){
 //	roomexists (roomid or name) sT: sBOOLN
 //  devicesinroom(roomid or name)  sT: sDEV
 ]
+}
 
 /*private Map functions(){
-	return functionsFLD
+	return functionsL()
 }
 
 def getIftttKey(){
@@ -6042,7 +6185,7 @@ private Map getRuleOptions(){
 }
 
 Map getChildVirtDevices(){
-	Map<String,Map> result=virtualDevices()
+	Map<String,Map> result=virtualDevices(false)
 	Map cleanResult=[:]
 	Map defv=[(sN):sA]
 	Map t0
@@ -6062,7 +6205,7 @@ Map getChildVirtDevices(){
 
 // m - momentary - restrict to comparisons that accept virtual devices - g: includes 'v', or datatype match (e) executes
 // x - use all comparisons, and exclude by datatype && no g:v (x mean attribute has history?)
-private Map<String,Map> virtualDevices(){
+private Map<String,Map> virtualDevices(Boolean forIde=true){
 	return [
 		date:			[ (sN): 'Date',				(sT): sDATE,		],
 		datetime:		[ (sN): 'Date & Time',		(sT): sDTIME,	],
@@ -6074,7 +6217,7 @@ private Map<String,Map> virtualDevices(){
 		tile:			[ (sN): 'Piston tile',		(sT): sENUM,	(sO): ['1':'1','2':'2','3':'3','4':'4','5':'5','6':'6','7':'7','8':'8','9':'9','10':'10','11':'11','12':'12','13':'13','14':'14','15':'15','16':'16'],		(sM): true	],
 		pistonResume: 	[ (sN): 'Piston Resumed',	(sT): sSTR,		(sM): true],
 // HE specific events
-		rule:			[ (sN): 'Rule',				(sT): sENUM,	(sO): getRuleOptions(),		(sM): true ],
+		rule:			[ (sN): 'Rule',				(sT): sENUM,	(sO): forIde ? getRuleOptions() : [:],		(sM): true ],
 		cloudBackup:	[ (sN): 'Cloud Backup',		(sT): sSTR,		(sM): true],
 		manualReboot:	[ (sN): 'Manual Reboot',	(sT): sSTR,		(sM): true],
 		update:			[ (sN): 'Software Update',	(sT): sSTR,		(sM): true],
@@ -6095,7 +6238,15 @@ private Map<String,Map> virtualDevices(){
 	]
 }
 
-@Field final List theColorsFLD=[
+@Field volatile static List<Map> theColorsFLD=null
+/** built once on first use, then shared by all executions (avoids rebuilding the literal every time the app runs) */
+private static List<Map> theColorsL(){
+	List<Map> r; r=theColorsFLD
+	if(r==null){ r=theColorsB(); theColorsFLD=r }
+	return r
+}
+private static List<Map> theColorsB(){
+	return [
 		[(sNM): "Alice Blue", (sRGB): "#F0F8FF", (sH): 208, (sS): i100, (sL): 97], [(sNM): "Antique White", (sRGB): "#FAEBD7", (sH): 34, (sS): 78, (sL): 91],
 		[(sNM): "Aqua", (sRGB): "#00FFFF", (sH): 180, (sS): i100, (sL): 50], [(sNM): "Aquamarine", (sRGB): "#7FFFD4", (sH): 160, (sS): i100, (sL): 75],
 		[(sNM): "Azure", (sRGB): "#F0FFFF", (sH): 180, (sS): i100, (sL): 97], [(sNM): "Beige", (sRGB): "#F5F5DC", (sH): 60, (sS): 56, (sL): 91],
@@ -6168,9 +6319,10 @@ private Map<String,Map> virtualDevices(){
 		[(sNM): "White", (sRGB): "#FFFFFF", (sH): iZ, (sS): iZ, (sL): i100], [(sNM): "White Smoke", (sRGB): "#F5F5F5", (sH): iZ, (sS): iZ, (sL): 96],
 		[(sNM): "Yellow", (sRGB): "#FFFF00", (sH): 60, (sS): i100, (sL): 50], [(sNM): "Yellow Green", (sRGB): "#9ACD32", (sH): 80, (sS): 61, (sL): 50]
 ]
+}
 
 List getColors(){
-	return theColorsFLD
+	return theColorsL() // shared static list; callers only read it
 }
 
 
@@ -6391,7 +6543,9 @@ static void clearHashMap(String wName){
 	theHashMapVFLD=theHashMapVFLD
 }
 
-private String sAppId(){ return ((Long)app.id).toString() }
+/** per execution (non-static) cache: app.id is a dynamic lookup used many times per call (hashId, every FLD key) */
+@Field String sAppIdFLD
+private String sAppId(){ if(sAppIdFLD==null) sAppIdFLD=((Long)app.id).toString(); return sAppIdFLD }
 
 String hashPID(id){
 	if(acctANDloc()) return hashId(locationSid()+id.toString()) //todo still not unique
